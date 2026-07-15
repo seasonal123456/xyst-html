@@ -1,0 +1,40 @@
+CREATE TABLE "Job" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "status" TEXT NOT NULL,
+  "mode" TEXT NOT NULL,
+  "name" TEXT NOT NULL,
+  "customerName" TEXT,
+  "customerContact" TEXT,
+  "industry" TEXT,
+  "business" TEXT,
+  "targetCustomer" TEXT,
+  "sellingPoints" TEXT,
+  "contact" TEXT,
+  "note" TEXT,
+  "contentType" TEXT NOT NULL,
+  "style" TEXT NOT NULL,
+  "usagePurpose" TEXT,
+  "needManualRefine" BOOLEAN NOT NULL DEFAULT false,
+  "materialConsent" BOOLEAN NOT NULL DEFAULT false,
+  "prompt" TEXT NOT NULL,
+  "generatedImageUrl" TEXT,
+  "publicResultUrl" TEXT,
+  "adminNote" TEXT,
+  "error" TEXT,
+  "regeneratedCount" INTEGER NOT NULL DEFAULT 0,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" DATETIME NOT NULL
+);
+
+CREATE TABLE "JobFile" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "jobId" TEXT NOT NULL,
+  "originalName" TEXT NOT NULL,
+  "storedName" TEXT NOT NULL,
+  "mimeType" TEXT NOT NULL,
+  "size" INTEGER NOT NULL,
+  "url" TEXT NOT NULL,
+  "storageType" TEXT NOT NULL,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "JobFile_jobId_fkey" FOREIGN KEY ("jobId") REFERENCES "Job" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);

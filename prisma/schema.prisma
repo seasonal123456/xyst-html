@@ -1,0 +1,256 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Job {
+  id                String   @id @default(cuid())
+  ownerAccountId    String?
+  status            String
+  mode              String
+  name              String
+  customerName      String?
+  customerContact   String?
+  industry          String?
+  business          String?
+  targetCustomer    String?
+  sellingPoints     String?
+  contact           String?
+  note              String?
+  contentType       String
+  style             String
+  usagePurpose      String?
+  needManualRefine  Boolean  @default(false)
+  materialConsent   Boolean  @default(false)
+  prompt            String
+  generatedImageUrl String?
+  publicResultUrl   String?
+  adminNote         String?
+  error             String?
+  chargedCreditAt   DateTime?
+  chargedCreditAmount Int    @default(0)
+  regeneratedCount  Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  files             JobFile[]
+}
+
+model JobFile {
+  id           String   @id @default(cuid())
+  jobId        String
+  job          Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  originalName String
+  storedName   String
+  mimeType     String
+  size         Int
+  url          String
+  storageType  String
+  createdAt    DateTime @default(now())
+}
+
+model SiteJob {
+  id                  String   @id @default(cuid())
+  ownerAccountId      String?
+  customerName        String?
+  customerContact     String?
+  businessDescription String
+  websitePurpose      String
+  materialConsent     Boolean  @default(false)
+  status              String
+  selectedMainStyleId String?
+  finalCopyVersionId  String?
+  preferUploadedStyleReference Boolean @default(false)
+  codexPrompt         String?
+  previewUrl          String?
+  siteZipUrl          String?
+  screenshotUrl       String?
+  publishedUrl        String?
+  publishProvider     String?
+  publishStatus       String?
+  publishError        String?
+  netlifySiteId       String?
+  netlifySiteName     String?
+  netlifyDeployId     String?
+  publishedAt         DateTime?
+  deliveryNote        String?
+  deliveryIntegrityReportJson String?
+  adminNote           String?
+  workerId            String?
+  workerLeaseUntil    DateTime?
+  siteGenerationQueuedAt DateTime?
+  siteGenerationStartedAt DateTime?
+  siteGenerationCompletedAt DateTime?
+  siteGenerationAttemptCount Int   @default(0)
+  chargedCreditAt     DateTime?
+  chargedCreditAmount Int      @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  ownerAccount        CustomerAccount? @relation(fields: [ownerAccountId], references: [id], onDelete: SetNull)
+  assets              SiteAsset[]
+  styleConcepts       StyleConcept[]
+  copyVersions        CopyVersion[]
+  revisions           SiteRevision[]
+}
+
+model SiteAsset {
+  id           String   @id @default(cuid())
+  siteJobId    String
+  siteJob      SiteJob  @relation(fields: [siteJobId], references: [id], onDelete: Cascade)
+  originalName String
+  storedName   String
+  mimeType     String
+  size         Int
+  url          String
+  storageType  String
+  assetRole    String?
+  createdAt    DateTime @default(now())
+}
+
+model StyleConcept {
+  id               String   @id @default(cuid())
+  siteJobId        String
+  siteJob          SiteJob  @relation(fields: [siteJobId], references: [id], onDelete: Cascade)
+  styleName        String
+  styleDescription String
+  suitableFor      String?
+  schemeType       String?
+  layoutStyle      String?
+  colorTendency    String?
+  visualTechniquesJson String?
+  emotionalDescription String?
+  imageUrl         String
+  generationBatch  Int
+  mode             String
+  isFavorite       Boolean  @default(false)
+  isMainStyle      Boolean  @default(false)
+  createdAt        DateTime @default(now())
+}
+
+model CopyVersion {
+  id            String   @id @default(cuid())
+  siteJobId     String
+  siteJob       SiteJob  @relation(fields: [siteJobId], references: [id], onDelete: Cascade)
+  versionNumber Int
+  contentJson   String
+  isFinal       Boolean  @default(false)
+  createdAt     DateTime @default(now())
+}
+
+model CopyAnnotation {
+  id             String   @id @default(cuid())
+  copyVersionId  String
+  moduleId       String
+  selectedText   String
+  annotationType String
+  startOffset    Int?
+  endOffset      Int?
+  note           String?
+  createdAt      DateTime @default(now())
+}
+
+model SiteRevision {
+  id                    String   @id @default(cuid())
+  siteJobId             String
+  siteJob               SiteJob  @relation(fields: [siteJobId], references: [id], onDelete: Cascade)
+  versionNumber         Int
+  revisionInstruction   String
+  previewUrl            String?
+  screenshotUrl         String?
+  generator             String?
+  status                String
+  error                 String?
+  chargedCreditAmount   Int      @default(0)
+  createdAt             DateTime @default(now())
+
+  @@index([siteJobId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model ModelUsageLog {
+  id                  String   @id @default(cuid())
+  provider            String
+  operation           String
+  model               String?
+  endpoint            String?
+  jobId               String?
+  siteJobId           String?
+  status              String
+  requestCount        Int      @default(1)
+  imageCount          Int?
+  inputTokens         Int?
+  outputTokens        Int?
+  totalTokens         Int?
+  cachedInputTokens   Int?
+  reasoningTokens     Int?
+  promptCharacters    Int?
+  responseCharacters  Int?
+  durationMs          Int?
+  rawUsageJson        String?
+  metadataJson        String?
+  error               String?
+  createdAt           DateTime @default(now())
+
+  @@index([siteJobId])
+  @@index([jobId])
+  @@index([operation])
+  @@index([model])
+  @@index([createdAt])
+}
+
+model CustomerAccount {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  passwordHash String
+  credits      Int      @default(0)
+  status       String   @default("active")
+  note         String?
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions     CustomerSession[]
+  siteJobs     SiteJob[]
+  rechargeRequests CreditRechargeRequest[]
+
+  @@index([email])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model CreditRechargeRequest {
+  id            String   @id @default(cuid())
+  accountId     String
+  account       CustomerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  packageName   String
+  requestedCredits Int
+  amountYuan    Int
+  contact       String?
+  note          String?
+  status        String   @default("pending")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([accountId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model CustomerSession {
+  id          String   @id @default(cuid())
+  accountId   String
+  account     CustomerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  tokenHash   String   @unique
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([accountId])
+  @@index([expiresAt])
+}

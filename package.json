@@ -1,0 +1,48 @@
+{
+  "name": "ai-image-mvp-stage1",
+  "version": "0.4.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "prisma:generate": "prisma generate",
+    "prisma:generate:mysql": "node scripts/prepare-prisma-schema.mjs mysql && prisma generate --schema generated/prisma/schema.mysql.prisma",
+    "prisma:generate:postgres": "node scripts/prepare-prisma-schema.mjs postgres && prisma generate --schema generated/prisma/schema.postgresql.prisma",
+    "prisma:schema:mysql": "node scripts/prepare-prisma-schema.mjs mysql",
+    "prisma:schema:postgres": "node scripts/prepare-prisma-schema.mjs postgres",
+    "prisma:push:mysql": "node scripts/prepare-prisma-schema.mjs mysql && prisma db push --schema generated/prisma/schema.mysql.prisma",
+    "prisma:push:postgres": "node scripts/prepare-prisma-schema.mjs postgres && prisma db push --schema generated/prisma/schema.postgresql.prisma",
+    "prisma:migrate": "prisma migrate dev",
+    "db:init": "node scripts/init-db.mjs",
+    "db:backup:sqlite": "node scripts/backup-sqlite.mjs",
+    "db:export:sqlite": "node scripts/export-sqlite-data.mjs",
+    "db:import:prisma": "node scripts/import-prisma-data.mjs",
+    "worker:site": "tsx scripts/site-worker.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "5.22.0",
+    "next": "16.2.9",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "overrides": {
+    "postcss": "8.5.16"
+  },
+  "devDependencies": {
+    "@netlify/plugin-nextjs": "^5.15.12",
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "autoprefixer": "10.4.22",
+    "eslint": "9.39.2",
+    "eslint-config-next": "16.2.9",
+    "netlify-cli": "^26.2.0",
+    "postcss": "8.5.16",
+    "prisma": "5.22.0",
+    "tailwindcss": "3.4.18",
+    "tsx": "^4.23.0",
+    "typescript": "5.9.3"
+  }
+}

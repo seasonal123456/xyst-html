@@ -92,8 +92,8 @@ function highlightedSegments(draft: CopyModule): HighlightSegment[] {
 }
 
 function highlightClass(type?: HighlightType) {
-  if (type === "lock") return "rounded bg-slate-950 px-1 py-0.5 font-black text-white shadow-sm";
-  if (type === "reject") return "rounded bg-red-100 px-1 py-0.5 font-black text-red-700 ring-1 ring-red-200";
+  if (type === "lock") return "rounded-sm bg-slate-950/15";
+  if (type === "reject") return "rounded-sm bg-red-200/70 ring-1 ring-red-200";
   return "";
 }
 
@@ -416,7 +416,7 @@ export default function SiteCopyPage() {
                 <div
                   ref={overlayRef}
                   aria-hidden="true"
-                  className="pointer-events-none absolute inset-0 overflow-auto whitespace-pre-wrap px-4 py-4 text-base leading-8 text-slate-800 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                  className="pointer-events-none absolute inset-0 overflow-auto whitespace-pre-wrap px-4 py-4 text-base leading-8 text-transparent [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                 >
                   {segments.map((segment, index) => (
                     <span key={index} className={highlightClass(segment.type)}>
@@ -431,7 +431,7 @@ export default function SiteCopyPage() {
                   value={draft.content}
                   maxLength={copyCharLimit + 1000}
                   onChange={(event) => updateContent(event.target.value)}
-                  className="relative min-h-[720px] w-full resize-y bg-transparent px-4 py-4 text-base leading-8 text-transparent caret-slate-950 outline-none selection:bg-cyan-200/70"
+                  className="relative min-h-[720px] w-full resize-y bg-transparent px-4 py-4 text-base leading-8 text-slate-900 caret-slate-950 outline-none selection:bg-cyan-200/70"
                   spellCheck={false}
                 />
               </div>

@@ -32,7 +32,7 @@ export async function generateFinalWebsitePreview(
         generator: "codex"
       };
     } catch (error) {
-      if (process.env.SITE_GENERATOR_DISABLE_FALLBACK === "true") {
+      if (process.env.SITE_GENERATOR_ENABLE_TEMPLATE_FALLBACK !== "true") {
         throw error;
       }
       const fallback = await generateTemplateWebsitePreview(job, style, options);

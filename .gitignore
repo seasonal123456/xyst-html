@@ -30,6 +30,7 @@ next-start.log
 next-start.err.log
 site-worker.log
 site-worker.err.log
+site-worker.current.pid
 
 public/uploads/*
 !public/uploads/.gitkeep

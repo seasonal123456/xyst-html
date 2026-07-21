@@ -92,8 +92,6 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 
-  await prisma.styleConcept.deleteMany({ where: { siteJobId: id } });
-
   await prisma.styleConcept.createMany({
     data: concepts.map((concept) => ({
       siteJobId: id,

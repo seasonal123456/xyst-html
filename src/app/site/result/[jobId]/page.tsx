@@ -1,6 +1,5 @@
 import { FormattedCopyDraft } from "@/components/site/formatted-copy-draft";
 import { QueuedSiteActions } from "@/components/site/queued-site-actions";
-import { SiteRevisionPanel } from "@/components/site/site-revision-panel";
 import { StandardDeliveryActions } from "@/components/site/standard-delivery-actions";
 import { prisma } from "@/lib/db";
 import { getSiteJobDeploymentNumber } from "@/lib/site/site-publisher";
@@ -67,7 +66,7 @@ function headerContent(siteJob: SiteJobDto) {
     return {
       eyebrow: "Website Engine",
       title: "官网正在生成",
-      description: "本机生成引擎正在制作官网，请保持 worker 和服务运行。生成完成后页面会自动刷新为预览结果。"
+      description: ""
     };
   }
   if (siteJob.status === "failed") {
@@ -213,9 +212,11 @@ export default async function SiteResultPage({ params }: PageProps) {
           <div>
             <p className="text-xs font-black uppercase tracking-wide text-teal-700">{header.eyebrow}</p>
             <h1 className="mt-2 text-4xl font-black text-slate-950">{header.title}</h1>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
-              {header.description}
-            </p>
+            {header.description ? (
+              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
+                {header.description}
+              </p>
+            ) : null}
             {isGenerating ? <WebsiteGenerationWarning /> : null}
           </div>
           <span className="rounded-full bg-slate-100 px-3 py-2 text-xs font-black text-slate-700">{statusLabel(siteJob.status)}</span>
@@ -270,7 +271,6 @@ export default async function SiteResultPage({ params }: PageProps) {
         <img src={siteJob.screenshotUrl} alt="官网截图" className="mt-5 w-full rounded-lg border border-slate-200 shadow-panel" />
       ) : null}
 
-      {siteJob.previewUrl ? <SiteRevisionPanel jobId={siteJob.id} revisions={siteJob.revisions} /> : null}
     </main>
   );
 }

@@ -85,6 +85,13 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 
+  if (siteJob.status === "standard_delivery_ready" || siteJob.status === "delivered") {
+    return NextResponse.json(
+      { success: false, error: "官网已进入交付阶段，最终交付结果已锁定，不能再提交修改。" },
+      { status: 409, headers: rateLimitHeaders(rate) }
+    );
+  }
+
   const hasActiveRevision = siteJob.revisions.some((revision) => revision.status === "queued" || revision.status === "generating");
   if (hasActiveRevision || siteJob.status === "site_generation_queued" || siteJob.status === "site_generating") {
     return NextResponse.json(

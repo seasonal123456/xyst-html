@@ -43,14 +43,10 @@ function LoginForm() {
                 <span className="grid h-10 w-10 place-items-center rounded-lg bg-white text-cyan-600">新</span>
                 <span>新颖数投工作台</span>
               </a>
-              <h1 className="mt-16 max-w-md text-4xl font-black leading-tight">登录后开始生成你的官网初稿</h1>
+              <h1 className="mt-16 max-w-md text-4xl font-black leading-tight">登录新颖数投工作台</h1>
               <p className="mt-5 max-w-md text-sm font-semibold leading-7 text-cyan-50">
-                已有账号可直接登录；新客户可以先注册会员账号，再由后台开通体验次数或充值次数。
+                已有账号可直接登录；没有账号请先注册会员，再充值官网制作次数。
               </p>
-            </div>
-            <div className="grid gap-3 text-sm font-bold text-cyan-50">
-              <p className="rounded-md bg-white/14 px-4 py-3 backdrop-blur">上传资料 → 生成 3 张风格图 → 确认文案 → 生成官网</p>
-              <p className="rounded-md bg-white/14 px-4 py-3 backdrop-blur">每个官网任务第一次生成风格图时扣 1 次，后续文案、官网初稿和交付包不重复扣次。</p>
             </div>
           </div>
         </div>

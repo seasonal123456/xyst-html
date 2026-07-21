@@ -25,6 +25,8 @@ export default async function SitePreviewPage({ params }: PageProps) {
     );
   }
 
+  const previewFrameUrl = `/api/site-jobs/${siteJob.id}/preview/files`;
+
   return (
     <main className="flex min-h-screen flex-col bg-slate-100">
       <header className="border-b border-slate-200 bg-white px-4 py-3">
@@ -37,7 +39,7 @@ export default async function SitePreviewPage({ params }: PageProps) {
             <a href={`/site/result/${siteJob.id}`} className="rounded-md border border-slate-300 bg-white px-4 py-2 text-xs font-black text-slate-700">
               返回结果页
             </a>
-            <a href={siteJob.previewUrl} target="_blank" rel="noreferrer" className="rounded-md bg-slate-950 px-4 py-2 text-xs font-black text-white">
+            <a href={previewFrameUrl} target="_blank" rel="noreferrer" className="rounded-md bg-slate-950 px-4 py-2 text-xs font-black text-white">
               全屏浏览
             </a>
           </div>
@@ -50,7 +52,7 @@ export default async function SitePreviewPage({ params }: PageProps) {
         </div>
         <iframe
           title="官网在线预览"
-          src={siteJob.previewUrl}
+          src={previewFrameUrl}
           className="min-h-[calc(100vh-150px)] flex-1 rounded-lg border border-slate-200 bg-white shadow-panel"
         />
       </section>

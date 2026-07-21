@@ -1,3 +1,6 @@
+import Link from "next/link";
+import { HomeTutorialEntry } from "@/components/site/home-tutorial-entry";
+
 const navItems = [
   ["流程", "#flow"],
   ["包含", "#price"],
@@ -47,18 +50,18 @@ export default function HomePage() {
     <main className="min-h-screen overflow-hidden bg-[#f7f9fc] text-slate-950">
       <section className="relative min-h-[820px] border-b border-slate-200 bg-white md:min-h-[860px]">
         <img
-          src="/brand/xinyingst-launch-hero.png"
+          src="/brand/xinyingst-home-hero-product-20260721.png"
           alt=""
-          className="absolute inset-0 h-full w-full object-cover object-center"
+          className="absolute inset-0 h-full w-full object-cover object-[70%_center] md:object-center"
         />
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(255,255,255,.96)_0%,rgba(255,255,255,.88)_34%,rgba(255,255,255,.28)_72%,rgba(255,255,255,.12)_100%)]" />
         <div className="absolute inset-x-0 bottom-0 h-36 bg-[linear-gradient(180deg,rgba(247,249,252,0),#f7f9fc)]" />
 
         <header className="relative z-10 mx-auto flex h-[72px] max-w-7xl items-center justify-between px-5 py-5">
-          <a href="/" className="flex items-center gap-3 font-black text-slate-950">
+          <Link href="/" className="flex items-center gap-3 font-black text-slate-950">
             <span className="grid h-9 w-9 place-items-center rounded-lg bg-slate-950 text-sm text-white">新</span>
             <span>新颖数投</span>
-          </a>
+          </Link>
           <nav className="hidden items-center gap-8 text-sm font-bold text-slate-600 md:flex">
             {navItems.map(([label, href]) => (
               <a key={label} href={href} className="transition hover:text-sky-600">
@@ -66,9 +69,9 @@ export default function HomePage() {
               </a>
             ))}
           </nav>
-          <a href="/login?next=/site/start" className="rounded-lg border border-slate-300 bg-white/80 px-4 py-2 text-sm font-black text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:border-sky-300 hover:text-sky-700">
+          <Link href="/login?next=/site/start" className="rounded-lg border border-slate-300 bg-white/80 px-4 py-2 text-sm font-black text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:border-sky-300 hover:text-sky-700">
             登录
-          </a>
+          </Link>
         </header>
 
         <div className="relative z-10 mx-auto flex min-h-[720px] max-w-7xl items-center px-5 pb-20 pt-10 md:min-h-[760px]">
@@ -83,22 +86,19 @@ export default function HomePage() {
               <span className="block">让官网设计</span>
               <span className="block">真正随你流转</span>
             </p>
-            <p className="mt-6 max-w-[21rem] text-base font-semibold leading-8 text-slate-600 sm:max-w-2xl md:text-lg">
-              <span className="block">只需准备文案和展示图片，即可快速拓展设计为可下载、可浏览、可部署的官网。</span>
-              <span className="block">399 元/次制作，赠送轻量化上线服务。</span>
-            </p>
             <div className="mt-9 flex flex-wrap gap-3">
-              <a href="/site/start" className="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-6 py-4 text-sm font-black text-white shadow-[0_18px_44px_rgba(15,23,42,.22)] transition hover:-translate-y-1 hover:bg-sky-700">
+              <Link href="/site/start" className="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-6 py-4 text-sm font-black text-white shadow-[0_18px_44px_rgba(15,23,42,.22)] transition hover:-translate-y-1 hover:bg-sky-700">
                 开始生成官网 <ArrowIcon />
-              </a>
+              </Link>
               <a href="#price" className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white/80 px-6 py-4 text-sm font-black text-slate-800 shadow-sm transition hover:-translate-y-1 hover:border-sky-300 hover:text-sky-700">
                 查看服务内容
               </a>
             </div>
+            <HomeTutorialEntry />
             <div className="mt-12 grid max-w-2xl grid-cols-3 gap-2 sm:gap-3">
               {keynoteStats.map(([value, label]) => (
-                <div key={value} className="rounded-lg border border-white bg-white/72 p-3 shadow-[0_20px_50px_rgba(15,23,42,.08)] backdrop-blur sm:p-4">
-                  <div className="text-lg font-black leading-tight text-slate-950 sm:text-xl">{value}</div>
+                <div key={value} className="rounded-lg border border-white bg-white/90 p-3 shadow-[0_20px_50px_rgba(15,23,42,.08)] backdrop-blur sm:bg-white/82 sm:p-4">
+                  <div className="whitespace-nowrap text-base font-black leading-tight text-slate-950 sm:text-xl">{value}</div>
                   <div className="mt-1 text-[11px] font-bold leading-snug text-slate-500 sm:text-xs">{label}</div>
                 </div>
               ))}
@@ -171,9 +171,9 @@ export default function HomePage() {
                 <p className="mt-5 text-sm font-semibold leading-7 text-slate-600">
                   包含可下载官网包、完整前端代码、公开链接生成、后台记录同步和基础可访问性检查。
                 </p>
-                <a href="/site/start" className="mt-7 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-slate-950 px-5 py-4 text-sm font-black text-white transition hover:-translate-y-1 hover:bg-sky-700">
+                <Link href="/site/start" className="mt-7 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-slate-950 px-5 py-4 text-sm font-black text-white transition hover:-translate-y-1 hover:bg-sky-700">
                   生成我的官网 <ArrowIcon />
-                </a>
+                </Link>
               </div>
             </div>
           </div>

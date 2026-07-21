@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS "SiteJob" (
   "siteZipUrl" TEXT,
   "screenshotUrl" TEXT,
   "deliveryNote" TEXT,
+  "deliveryIntegrityReportJson" TEXT,
   "adminNote" TEXT,
   "chargedCreditAt" DATETIME,
   "chargedCreditAmount" INTEGER NOT NULL DEFAULT 0,
@@ -264,6 +265,7 @@ await ensureColumn("SiteJob", "siteGenerationCompletedAt", `"siteGenerationCompl
 await ensureColumn("SiteJob", "siteGenerationAttemptCount", `"siteGenerationAttemptCount" INTEGER NOT NULL DEFAULT 0`);
 await ensureColumn("SiteJob", "chargedCreditAt", `"chargedCreditAt" DATETIME`);
 await ensureColumn("SiteJob", "chargedCreditAmount", `"chargedCreditAmount" INTEGER NOT NULL DEFAULT 0`);
+await ensureColumn("SiteJob", "deliveryIntegrityReportJson", `"deliveryIntegrityReportJson" TEXT`);
 await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "SiteJob_ownerAccountId_idx" ON "SiteJob"("ownerAccountId");`);
 await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "SiteJob_status_updatedAt_idx" ON "SiteJob"("status", "updatedAt");`);
 await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "SiteJob_workerLeaseUntil_idx" ON "SiteJob"("workerLeaseUntil");`);

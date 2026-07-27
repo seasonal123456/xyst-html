@@ -1,4 +1,5 @@
 import { spawn } from "child_process";
+import { existsSync, readdirSync, statSync } from "fs";
 import path from "path";
 import { access, appendFile, mkdir, readFile, readdir, stat, writeFile } from "fs/promises";
 import { elapsedMs, extractUsageFromResponse, recordModelUsage } from "@/lib/model-usage";
@@ -64,6 +65,44 @@ function safeName(value: string) {
 
 function safeAssetName(value: string) {
   return value.replace(/[^a-zA-Z0-9._-]/g, "-").replace(/-+/g, "-").slice(0, 120) || "asset";
+}
+
+function resolveCodexFromPath() {
+  const pathValue = process.env.PATH || process.env.Path || "";
+  const extensions = process.platform === "win32" ? [".exe", ".cmd", ".bat", ""] : [""];
+  for (const dir of pathValue.split(path.delimiter)) {
+    if (!dir) continue;
+    for (const extension of extensions) {
+      const candidate = path.join(dir, `codex${extension}`);
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  return null;
+}
+
+function findBundledCodexCli() {
+  if (process.platform !== "win32") return null;
+  const homeDir = process.env.USERPROFILE || process.env.HOME;
+  if (!homeDir) return null;
+
+  const extensionsRoot = path.join(homeDir, ".vscode", "extensions");
+  try {
+    return (
+      readdirSync(extensionsRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && /^openai\.chatgpt-.*-win32-x64$/.test(entry.name))
+        .map((entry) => path.join(extensionsRoot, entry.name, "bin", "windows-x86_64", "codex.exe"))
+        .filter((candidate) => existsSync(candidate))
+        .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0] || null
+    );
+  } catch {
+    return null;
+  }
+}
+
+function resolveCodexCliPath() {
+  const configured = process.env.CODEX_CLI_PATH?.trim();
+  if (configured) return configured;
+  return resolveCodexFromPath() || findBundledCodexCli() || "codex";
 }
 
 function buildOpenAiImageUrl(baseUrl: string, endpoint: string) {
@@ -1108,7 +1147,7 @@ async function publishSiteDirectory(siteDir: string, runName: string, contentAss
 
 function runCodex(prompt: string, workDir: string, imagePaths: string[], options: CodexRunOptions) {
   return new Promise<void>((resolve, reject) => {
-    const codexPath = process.env.CODEX_CLI_PATH?.trim() || "codex";
+    const codexPath = resolveCodexCliPath();
     const lastMessagePath = path.join(workDir, "codex-last-message.txt");
     const progressPath = path.join(workDir, "codex-progress.log");
     const stdoutPath = path.join(workDir, "codex-stdout.log");
@@ -1175,6 +1214,18 @@ function runCodex(prompt: string, workDir: string, imagePaths: string[], options
 
     args.push("-");
     void appendFile(progressPath, `[${new Date().toISOString()}] starting codex ${model}; images=${imagePaths.length}; timeoutMs=${options.timeoutMs}\n`, "utf8");
+
+    if (path.isAbsolute(codexPath) && !existsSync(codexPath)) {
+      void appendFile(progressPath, `[${new Date().toISOString()}] codex cli missing: ${codexPath}\n`, "utf8");
+      void finish(new Error(`Codex CLI not found: ${codexPath}. Set CODEX_CLI_PATH to the full codex.exe path and restart the worker.`));
+      return;
+    }
+
+    if (process.platform === "win32" && codexPath === "codex") {
+      void appendFile(progressPath, `[${new Date().toISOString()}] codex cli missing from PATH\n`, "utf8");
+      void finish(new Error("Codex CLI not found in worker PATH. Set CODEX_CLI_PATH to the full codex.exe path and restart the worker."));
+      return;
+    }
 
     const child = spawn(codexPath, args, {
       cwd: workDir,

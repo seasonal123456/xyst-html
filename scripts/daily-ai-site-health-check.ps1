@@ -71,6 +71,36 @@ function Quote-PsLiteral {
   return "'" + ($Value -replace "'", "''") + "'"
 }
 
+function Resolve-CodexCli {
+  if ($env:CODEX_CLI_PATH) {
+    $configured = $env:CODEX_CLI_PATH.Trim()
+    if ($configured -and (Test-Path -LiteralPath $configured)) {
+      return (Resolve-Path -LiteralPath $configured).Path
+    }
+  }
+
+  $command = Get-Command codex -ErrorAction SilentlyContinue
+  if ($command -and $command.Source -and (Test-Path -LiteralPath $command.Source)) {
+    return (Resolve-Path -LiteralPath $command.Source).Path
+  }
+
+  $extensionsRoot = Join-Path $env:USERPROFILE ".vscode\extensions"
+  if (Test-Path -LiteralPath $extensionsRoot) {
+    $bundled = Get-ChildItem -LiteralPath $extensionsRoot -Directory -Filter "openai.chatgpt-*-win32-x64" -ErrorAction SilentlyContinue |
+      Sort-Object LastWriteTime -Descending |
+      ForEach-Object {
+        Join-Path $_.FullName "bin\windows-x86_64\codex.exe"
+      } |
+      Where-Object { Test-Path -LiteralPath $_ } |
+      Select-Object -First 1
+    if ($bundled) {
+      return (Resolve-Path -LiteralPath $bundled).Path
+    }
+  }
+
+  return $null
+}
+
 function Test-Url {
   param(
     [string]$Name,
@@ -114,6 +144,11 @@ function Get-WorkerProcesses {
 }
 
 $Env = Read-DotEnv $EnvPath
+$CodexCli = Resolve-CodexCli
+if ($CodexCli) {
+  $env:CODEX_CLI_PATH = $CodexCli
+  $env:Path = "$(Split-Path -Parent $CodexCli);$env:Path"
+}
 
 Add-Check "repo_root" "INFO" $RepoRoot
 
@@ -130,11 +165,23 @@ if (Test-Path -LiteralPath $NpmCmd) {
   Add-Check "npm" "FAIL" "Missing $NpmCmd" "Check portable Node package."
 }
 
+if ($CodexCli) {
+  try {
+    $codexVersion = (& $CodexCli --version 2>$null)
+    Add-Check "codex_cli" "PASS" "$CodexCli ($codexVersion)"
+  } catch {
+    Add-Check "codex_cli" "WARN" "$CodexCli found but version check failed: $($_.Exception.Message)" "Try opening Codex once, or update CODEX_CLI_PATH."
+  }
+} else {
+  Add-Check "codex_cli" "FAIL" "codex.exe not found" "Set CODEX_CLI_PATH or install/update the OpenAI ChatGPT/Codex extension."
+}
+
 $configSummary = @{
   SITE_GENERATION_MODE = $Env["SITE_GENERATION_MODE"]
   SITE_GENERATOR_PROVIDER = $Env["SITE_GENERATOR_PROVIDER"]
   WORKER_SERVER_BASE_URL = $Env["WORKER_SERVER_BASE_URL"]
   PUBLIC_SITE_BASE_URL = $Env["PUBLIC_SITE_BASE_URL"]
+  CODEX_CLI_PATH = $CodexCli
   CODEX_SITE_MODEL = $Env["CODEX_SITE_MODEL"]
   CODEX_SITE_TIMEOUT_MS = $Env["CODEX_SITE_TIMEOUT_MS"]
   WORKER_LEASE_SECONDS = $Env["WORKER_LEASE_SECONDS"]

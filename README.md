@@ -88,6 +88,7 @@ powershell -ExecutionPolicy Bypass -File "D:\codex002\project-card-tool\start-re
 - `deploy/project-card-tool.service`
 - `deploy/nginx-project-card-tool-http.conf`
 - `scripts/deploy/install-release.sh`
+- `scripts/deploy/configure-production-env.py`
 - `scripts/deploy/rollback-release.sh`
 - `scripts/deploy/verify-production.sh`
 

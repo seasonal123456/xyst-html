@@ -19,7 +19,7 @@
 1. 重新执行 ECS 只读盘点，确认 `8773` 未被其他服务占用，旧站 `3000` 和 Feishu Codex `8765` 正常。
 2. 上传干净 release zip 和 `scripts/deploy/install-release.sh` 到 ECS 临时目录。
 3. 以 root 运行安装脚本。首次运行只创建独立用户、目录、release 和 env 模板，然后停止。
-4. 在服务器填写 `/etc/project-card-tool/project-card-tool.env` 中的三个私密值，并保持权限 `0640 root:projectcard`。
+4. 通过 `scripts/deploy/configure-production-env.py` 的标准输入写入生图地址和密钥；脚本自动生成 SSO 密钥，并保持权限 `0640 root:projectcard`。不要把秘密放进命令行参数、代码或部署包。
 5. 再次运行安装脚本，启动 `project-card-tool.service`，要求本机 `/api/ready` 返回 `ok: true`。
 6. 新增 DNS A 记录：`card.xinyingst.com -> 8.138.148.34`。
 7. 安装独立 Nginx 配置，执行 `nginx -t` 后 reload。

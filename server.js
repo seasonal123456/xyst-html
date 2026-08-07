@@ -9,6 +9,7 @@ dns.setDefaultResultOrder("ipv4first");
 
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 4173);
+const HOST = process.env.HOST || "127.0.0.1";
 const DATA_DIR = path.resolve(process.env.PROJECT_CARD_DATA_DIR || (
   process.env.PROJECT_CARD_STORAGE_DIR
     ? path.dirname(path.resolve(process.env.PROJECT_CARD_STORAGE_DIR))
@@ -16,8 +17,9 @@ const DATA_DIR = path.resolve(process.env.PROJECT_CARD_DATA_DIR || (
 ));
 const STORAGE_DIR = path.resolve(process.env.PROJECT_CARD_STORAGE_DIR || path.join(DATA_DIR, "generated"));
 const TRACE_INDEX_FILE = path.join(STORAGE_DIR, "trace-index.json");
-const LOG_DIR = path.join(ROOT, "logs");
+const LOG_DIR = path.resolve(process.env.PROJECT_CARD_LOG_DIR || path.join(ROOT, "logs"));
 const LOG_FILE = path.join(LOG_DIR, "server.log");
+const TMP_DIR = path.resolve(process.env.PROJECT_CARD_TMP_DIR || path.join(ROOT, "tmp"));
 const API_BASE_URL = (process.env.IMAGE_API_BASE_URL || process.env.OPENAI_BASE_URL || "").replace(/\/$/, "");
 const API_KEY = process.env.IMAGE_API_KEY || process.env.OPENAI_API_KEY || "";
 const IMAGE_MODEL = process.env.IMAGE_API_MODEL || process.env.OPENAI_IMAGE_MODEL || "gpt-image-2";
@@ -152,12 +154,12 @@ process.on("unhandledRejection", (error) => {
 
 validateStartupConfig();
 
-server.listen(PORT, () => {
-  console.log(`Project Card Tool listening on http://localhost:${PORT}/`);
+server.listen(PORT, HOST, () => {
+  console.log(`Project Card Tool listening on http://${HOST}:${PORT}/`);
   console.log(`Image API: ${API_BASE_URL ? "configured" : "not configured"}`);
   console.log(`Image model: ${IMAGE_MODEL}`);
   console.log(`Runtime env: ${APP_ENV}`);
-  log(`START port=${PORT} env=${APP_ENV} api=${API_BASE_URL ? "configured" : "not configured"} model=${IMAGE_MODEL}`);
+  log(`START host=${HOST} port=${PORT} env=${APP_ENV} api=${API_BASE_URL ? "configured" : "not configured"} model=${IMAGE_MODEL}`);
 });
 
 function validateStartupConfig() {
@@ -456,7 +458,7 @@ async function callImageApiWithFetch(endpoint, apiBody) {
 
 async function callImageApiWithCurl(endpoint, apiBody) {
   const curl = await findCurlExe();
-  const tempDir = path.join(ROOT, "tmp", `image-api-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`);
+  const tempDir = path.join(TMP_DIR, `image-api-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`);
   const payloadPath = path.join(tempDir, "payload.json");
   await fs.mkdir(tempDir, { recursive: true });
   await fs.writeFile(payloadPath, toAsciiJson(apiBody), "utf8");
@@ -464,7 +466,6 @@ async function callImageApiWithCurl(endpoint, apiBody) {
     `header = "Authorization: Bearer ${escapeCurlConfig(API_KEY)}"`
   ].join("\n");
   const args = [
-    "--ssl-no-revoke",
     "--connect-timeout", "45",
     "--max-time", String(Math.ceil(IMAGE_API_REQUEST_TIMEOUT_MS / 1000)),
     "--silent",
@@ -476,6 +477,7 @@ async function callImageApiWithCurl(endpoint, apiBody) {
     "--config", "-",
     endpoint
   ];
+  if (process.platform === "win32") args.unshift("--ssl-no-revoke");
 
   try {
     const stdout = await new Promise((resolve, reject) => {
@@ -507,7 +509,7 @@ async function callImageApiWithCurl(endpoint, apiBody) {
 }
 
 async function findCurlExe() {
-  const command = process.env.CURL_EXE || "curl.exe";
+  const command = process.env.CURL_EXE || (process.platform === "win32" ? "curl.exe" : "curl");
   return command;
 }
 
@@ -538,6 +540,9 @@ function escapeCurlConfig(value) {
 }
 
 function callImageApiWithPowerShell(endpoint, apiBody) {
+  if (process.platform !== "win32") {
+    return Promise.reject(providerTransportError("PowerShell fallback is only available on Windows."));
+  }
   const script = [
     "$ErrorActionPreference = 'Stop'",
     "[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12",

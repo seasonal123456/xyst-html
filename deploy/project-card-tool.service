@@ -1,0 +1,28 @@
+[Unit]
+Description=Project Card Tool
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=projectcard
+Group=projectcard
+WorkingDirectory=/opt/project-card-tool/current
+EnvironmentFile=/etc/project-card-tool/project-card-tool.env
+ExecStart=/usr/bin/node /opt/project-card-tool/current/server.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/project-card-tool /var/log/project-card-tool
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=project-card-tool
+
+[Install]
+WantedBy=multi-user.target

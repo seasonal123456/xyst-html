@@ -51,6 +51,8 @@
 - 生产环境默认关闭工具内管理端
 - 生产环境默认要求生成码查询携带当前账号会话，避免裸查其他公司或员工记录
 - 生产环境应设置 `PROJECT_CARD_DATA_DIR`，让生成图片、追溯索引和 SSO 防重放记录保存在 release 目录之外
+- 生产环境应设置 `PROJECT_CARD_LOG_DIR=/var/log/project-card-tool` 和 `PROJECT_CARD_TMP_DIR=/var/lib/project-card-tool/tmp`，避免日志和临时请求写入只读 release
+- 生产服务应设置 `HOST=127.0.0.1`、`PORT=8773`，只允许 Nginx 从本机反代，不直接暴露 Node 端口
 - `storage/generated/**/*.json` 和 `trace-index.json` 静态访问必须返回 403
 - `app.js` 不允许出现客户端固定管理口令
 

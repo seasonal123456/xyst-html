@@ -47,9 +47,12 @@ powershell -ExecutionPolicy Bypass -File "D:\codex002\project-card-tool\start-re
 ## 环境变量清单
 
 - `PORT`：工具服务端口，本地默认 `4173`，生产建议使用独立内网端口。
+- `HOST`：监听地址，默认 `127.0.0.1`；生产保持该值，由 Nginx 对外提供 HTTPS。
 - `PROJECT_CARD_ENV`：运行环境；生产设置为 `production`。
 - `PROJECT_CARD_DATA_DIR`：运行数据根目录；生产建议 `/var/lib/project-card-tool`，其中会保存 SSO 防重放记录和生成图目录。
 - `PROJECT_CARD_STORAGE_DIR`：生成图片和追溯索引目录；不配置时默认使用 `${PROJECT_CARD_DATA_DIR}/generated`。
+- `PROJECT_CARD_LOG_DIR`：服务日志目录；生产建议 `/var/log/project-card-tool`。
+- `PROJECT_CARD_TMP_DIR`：生图接口临时请求目录；生产建议 `/var/lib/project-card-tool/tmp`。
 - `PROJECT_CARD_SSO_SECRET`：官网和工具共同持有的 SSO 签名密钥，生产必填，不进入前端和仓库。
 - `PROJECT_CARD_SSO_ISSUER`：SSO 签发方，默认 `ai-site`。
 - `PROJECT_CARD_SSO_AUDIENCE`：SSO 受众，默认 `project-card-tool`。
@@ -78,6 +81,17 @@ powershell -ExecutionPolicy Bypass -File "D:\codex002\project-card-tool\start-re
 - 独立日志目录：`/var/log/project-card-tool`。
 - 独立 systemd 服务：`project-card-tool.service`。
 - 独立 Nginx 配置：`/etc/nginx/conf.d/project-card-tool.conf`。
+
+仓库内已提供生产部署模板和脚本：
+
+- `deploy/project-card-tool.env.example`
+- `deploy/project-card-tool.service`
+- `deploy/nginx-project-card-tool-http.conf`
+- `scripts/deploy/install-release.sh`
+- `scripts/deploy/rollback-release.sh`
+- `scripts/deploy/verify-production.sh`
+
+脚本只使用上述独立边界。真正执行前仍需先恢复 ECS 登录，并按《开发总纲》逐步确认创建目录、写入 env、启动 systemd、配置 Nginx 和证书等生产变更。
 
 生产部署前必须先做只读盘点，再逐步执行：创建独立目录和用户、上传 release 包、写入私密 env、创建 systemd、创建 Nginx server block、申请 HTTPS 证书、检查 `/api/ready`。不得复用或覆盖 AI 官网、飞书 Codex 等旧项目的目录、端口、Nginx 配置、进程名、数据库或环境变量。
 

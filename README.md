@@ -1,5 +1,245 @@
 # Project Card Tool
 
+## 交接总览
+
+项目名称：
+
+产业园项目推荐卡生成器。
+
+技术栈：
+
+- 前端：原生 HTML / CSS / JavaScript，手机端优先，无构建步骤。
+- 服务端：Node.js 原生 HTTP 服务，负责 SSO 会话、真实生图接口调用、图片落盘和生成记录归档。
+- 生图能力：兼容 OpenAI Images API 风格的 Image 2 接口，模型默认 `gpt-image-2`。
+- 当前数据层：文件型轻量归档，使用 JSON 元数据和 PNG 文件保存生成结果；第一版未接入 MySQL / PostgreSQL / SQLite。
+- 官网接入：AI 官网会员中心签发一次性 SSO ticket，工具侧交换为轻量 session。
+
+启动方式：
+
+本地完整联调推荐使用：
+
+```powershell
+$env:IMAGE_API_BASE_URL="https://你的生图接口地址/v1"
+$env:IMAGE_API_KEY="你的 API Key"
+powershell -ExecutionPolicy Bypass -File "D:\codex002\project-card-tool\scripts\start-local-sso-stack.ps1" -StopExisting
+```
+
+启动后访问：
+
+```text
+工具页：http://127.0.0.1:4173/
+官网会员入口：http://127.0.0.1:3001/account
+```
+
+只启动工具服务：
+
+```powershell
+$env:IMAGE_API_BASE_URL="https://你的生图接口地址/v1"
+$env:IMAGE_API_KEY="你的 API Key"
+$env:IMAGE_API_MODEL="gpt-image-2"
+powershell -ExecutionPolicy Bypass -File "D:\codex002\project-card-tool\start-real-api-server.ps1"
+```
+
+需要配置：
+
+见下方“环境变量清单”。生产环境至少需要配置 SSO 密钥、生图接口地址和生图接口密钥。
+
+## 环境变量清单
+
+- `PORT`：工具服务端口，本地默认 `4173`，生产建议使用独立内网端口。
+- `PROJECT_CARD_ENV`：运行环境；生产设置为 `production`。
+- `PROJECT_CARD_DATA_DIR`：运行数据根目录；生产建议 `/var/lib/project-card-tool`，其中会保存 SSO 防重放记录和生成图目录。
+- `PROJECT_CARD_STORAGE_DIR`：生成图片和追溯索引目录；不配置时默认使用 `${PROJECT_CARD_DATA_DIR}/generated`。
+- `PROJECT_CARD_SSO_SECRET`：官网和工具共同持有的 SSO 签名密钥，生产必填，不进入前端和仓库。
+- `PROJECT_CARD_SSO_ISSUER`：SSO 签发方，默认 `ai-site`。
+- `PROJECT_CARD_SSO_AUDIENCE`：SSO 受众，默认 `project-card-tool`。
+- `IMAGE_API_BASE_URL`：生图接口 Base URL，生产必填，通常以 `/v1` 结尾。
+- `IMAGE_API_KEY`：生图接口密钥，生产必填，只允许通过环境变量或服务器私密 env 文件注入。
+- `IMAGE_API_MODEL`：生图模型，默认 `gpt-image-2`。
+- `IMAGE_API_REQUEST_TIMEOUT_MS`：生图请求超时时间，默认 `260000`。
+- `IMAGE_API_RETRY_COUNT`：真实生图重试次数，默认 `3`，范围 `1-3`。
+- `PROJECT_CARD_ALLOW_DEMO_SESSION`：仅开发环境可用；设为 `false` 可关闭 demo session。
+- `PROJECT_CARD_ADMIN_ENABLED`：仅开发环境可用；设为 `true` 才打开工具内管理台。
+- `PROJECT_CARD_PUBLIC_TRACE_LOOKUP`：生产默认不公开生成码裸查；除非明确需要，否则不要设为 `true`。
+
+部署：
+
+见下方“部署说明”。
+
+## 部署说明
+
+推荐生产边界如下：
+
+- 独立域名：`card.xinyingst.com`。
+- 独立服务端口：`127.0.0.1:8773`。
+- 独立代码目录：`/opt/project-card-tool/releases/<release>`，通过 `/opt/project-card-tool/current` 指向当前版本。
+- 独立环境变量文件：`/etc/project-card-tool/project-card-tool.env`。
+- 独立运行数据目录：`/var/lib/project-card-tool`，生成图片位于 `/var/lib/project-card-tool/generated`。
+- 独立日志目录：`/var/log/project-card-tool`。
+- 独立 systemd 服务：`project-card-tool.service`。
+- 独立 Nginx 配置：`/etc/nginx/conf.d/project-card-tool.conf`。
+
+生产部署前必须先做只读盘点，再逐步执行：创建独立目录和用户、上传 release 包、写入私密 env、创建 systemd、创建 Nginx server block、申请 HTTPS 证书、检查 `/api/ready`。不得复用或覆盖 AI 官网、飞书 Codex 等旧项目的目录、端口、Nginx 配置、进程名、数据库或环境变量。
+
+## 项目代码
+
+核心代码位于 `D:\codex002\project-card-tool`：
+
+- `index.html`：客户侧手机端页面结构。
+- `styles.css`：客户侧移动端 UI 和推荐卡工作台视觉样式。
+- `app.js`：前端交互、文本整理、图片上传限制、SSO exchange、生成调用和“我的生成”展示。
+- `server.js`：Node 服务端，包含静态文件服务、SSO 校验、生成接口、Image 2 调用、生成记录和追溯接口。
+- `scripts/start-local-sso-stack.ps1`：本地同时启动官网和工具，用于完整 SSO 联调。
+- `scripts/smoke-local-api.ps1`：不消耗生图额度的本地 smoke 检查。
+- `start-real-api-server.ps1`：只启动工具服务并接入真实生图接口。
+- `docs/SSO_CONTRACT.md`：官网会员 SSO 接入契约。
+- `docs/ACCEPTANCE.md`：MVP 验收清单。
+- `docs/deploy-audits/ecs-readonly-preflight-20260807-1033.md`：ECS 上线前只读盘点报告。
+
+## 数据库结构
+
+当前第一版没有接入传统数据库，使用本地文件归档作为轻量数据层。本地默认运行数据保存在：
+
+```text
+D:\codex002\project-card-tool\storage
+```
+
+生产环境建议设置：
+
+```text
+PROJECT_CARD_DATA_DIR=/var/lib/project-card-tool
+```
+
+设置后，生成图片、追溯索引和 SSO 防重放记录都会放在 release 目录之外，发版和回滚时不会覆盖运行数据。
+
+### 1. 生成图片
+
+路径：
+
+```text
+storage/generated/YYYYMMDD/*.png
+```
+
+用途：
+
+- 保存 Image 2 返回的项目推荐卡图片。
+- 前端通过返回的 `imageUrl` 预览图片。
+
+### 2. 单卡元数据
+
+路径：
+
+```text
+storage/generated/YYYYMMDD/*.json
+```
+
+结构：
+
+```json
+{
+  "traceCode": "PC-xxxx",
+  "projectName": "项目名，可为空",
+  "model": "gpt-image-2",
+  "endpoint": "configured-image-api",
+  "prompt": "本次生图提示词快照",
+  "payload": {
+    "sourceText": "用户提交的项目文案",
+    "contactName": "联系人，可为空",
+    "contactPhone": "联系电话，可为空",
+    "colorPreset": "配色方案",
+    "styleIntensity": "精致"
+  },
+  "context": {
+    "user": {
+      "id": "website:官网用户ID",
+      "externalCustomerId": "官网用户ID",
+      "name": "员工姓名",
+      "email": "员工邮箱",
+      "authSource": "website_sso"
+    },
+    "company": {
+      "id": "公司ID",
+      "name": "公司名",
+      "planType": "权益类型",
+      "validUntil": "有效期"
+    }
+  },
+  "createdAt": "2026-08-07T00:00:00.000Z"
+}
+```
+
+说明：
+
+- `.json` 元数据只供服务端追溯和管理员排查，不通过静态文件公开访问。
+- 生成码只进入系统记录，不显示在生成图片中。
+- 元数据不保存 API Key。
+
+### 3. 脱敏追溯索引
+
+路径：
+
+```text
+storage/generated/trace-index.json
+```
+
+结构：
+
+```json
+{
+  "version": 1,
+  "updatedAt": "2026-08-07T00:00:00.000Z",
+  "cards": [
+    {
+      "traceCode": "PC-xxxx",
+      "projectName": "项目名，可为空",
+      "createdAt": "2026-08-07T00:00:00.000Z",
+      "imageUrl": "/storage/generated/YYYYMMDD/example.png",
+      "context": {
+        "user": {},
+        "company": {}
+      },
+      "payload": {
+        "colorPreset": "白金",
+        "styleIntensity": "精致"
+      }
+    }
+  ]
+}
+```
+
+说明：
+
+- 用于加速“我的生成”和生成码追溯。
+- 不保存原始项目文案、联系人、联系电话和完整 prompt。
+- 静态访问返回 `403`，只能通过服务端接口读取脱敏摘要。
+
+### 4. SSO 防重放记录
+
+路径：
+
+```text
+storage/sso-used-jti.json
+```
+
+结构：
+
+```json
+{
+  "一次性jti": 1785859500
+}
+```
+
+说明：
+
+- 记录已使用过的 SSO ticket ID，避免同一 ticket 被重复交换。
+- key 为 ticket `jti`，value 为过期时间戳。
+
+长期运营建议：
+
+- 公司、员工、权益、批次、生成记录、用量流水、管理员审计迁移到 SQLite 或 PostgreSQL。
+- 图片和用户上传素材迁移到独立 OSS bucket / prefix。
+- 运行数据目录放在 release 目录之外，避免发版覆盖。
+
 独立项目推荐卡工具 MVP。当前版本是手机端优先的零构建前端 + 本地轻量 Node 服务，用于验证“官网会员进入后，粘贴项目资料，生成招商推荐卡”的真实闭环。
 
 ## 当前主流程

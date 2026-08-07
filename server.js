@@ -9,7 +9,12 @@ dns.setDefaultResultOrder("ipv4first");
 
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 4173);
-const STORAGE_DIR = path.join(ROOT, "storage", "generated");
+const DATA_DIR = path.resolve(process.env.PROJECT_CARD_DATA_DIR || (
+  process.env.PROJECT_CARD_STORAGE_DIR
+    ? path.dirname(path.resolve(process.env.PROJECT_CARD_STORAGE_DIR))
+    : path.join(ROOT, "storage")
+));
+const STORAGE_DIR = path.resolve(process.env.PROJECT_CARD_STORAGE_DIR || path.join(DATA_DIR, "generated"));
 const TRACE_INDEX_FILE = path.join(STORAGE_DIR, "trace-index.json");
 const LOG_DIR = path.join(ROOT, "logs");
 const LOG_FILE = path.join(LOG_DIR, "server.log");
@@ -19,7 +24,7 @@ const IMAGE_MODEL = process.env.IMAGE_API_MODEL || process.env.OPENAI_IMAGE_MODE
 const SSO_SECRET = process.env.PROJECT_CARD_SSO_SECRET || "";
 const SSO_ISSUER = process.env.PROJECT_CARD_SSO_ISSUER || "ai-site";
 const SSO_AUDIENCE = process.env.PROJECT_CARD_SSO_AUDIENCE || "project-card-tool";
-const SSO_USED_JTI_FILE = path.join(ROOT, "storage", "sso-used-jti.json");
+const SSO_USED_JTI_FILE = path.join(DATA_DIR, "sso-used-jti.json");
 const MAX_JSON_BODY_BYTES = 16_000_000;
 const MAX_SOURCE_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_SOURCE_TEXT_CHARS = 20_000;
@@ -264,7 +269,7 @@ async function handleGenerateCard(req, res) {
   const day = compactDate();
   const fileBase = `${safeFileName(payload.projectName || "project-card")}-${traceCode}-${crypto.randomUUID().slice(0, 8)}`;
   const relativeDir = path.join("storage", "generated", day);
-  const absoluteDir = path.join(ROOT, relativeDir);
+  const absoluteDir = path.join(STORAGE_DIR, day);
   await fs.mkdir(absoluteDir, { recursive: true });
 
   const imagePath = path.join(absoluteDir, `${fileBase}.png`);
@@ -912,7 +917,7 @@ function publicTraceCard(found) {
   if (found.card) return found.card;
   const { meta, file } = found;
   const imagePath = file.replace(/\.json$/i, ".png");
-  const relativeImage = path.relative(ROOT, imagePath);
+  const relativeImage = path.join("storage", "generated", path.relative(STORAGE_DIR, imagePath));
   const payload = stripPrivateTraceFields(stripLargeFields(meta.payload || {}));
   return {
     traceCode: meta.traceCode || "",
@@ -946,11 +951,19 @@ async function serveStatic(req, res) {
   if (/^\/storage\/generated\/.*\.json$/i.test(requestPath)) {
     return sendText(res, 403, "Generated metadata is not publicly served. Use /api/trace-card for a safe summary.");
   }
+  if (requestPath.startsWith("/storage/generated/")) {
+    const storagePath = path.normalize(path.join(STORAGE_DIR, requestPath.replace(/^\/storage\/generated\/?/, "")));
+    if (!isPathInside(storagePath, STORAGE_DIR)) return sendText(res, 403, "Forbidden");
+    return await sendStaticFile(res, storagePath);
+  }
 
   const fullPath = path.normalize(path.join(ROOT, requestPath.replace(/^\/+/, "")));
-  const rootWithSep = ROOT.endsWith(path.sep) ? ROOT : `${ROOT}${path.sep}`;
-  if (fullPath !== ROOT && !fullPath.startsWith(rootWithSep)) return sendText(res, 403, "Forbidden");
+  if (!isPathInside(fullPath, ROOT)) return sendText(res, 403, "Forbidden");
 
+  return await sendStaticFile(res, fullPath);
+}
+
+async function sendStaticFile(res, fullPath) {
   try {
     const stat = await fs.stat(fullPath);
     if (!stat.isFile()) return sendText(res, 404, "Not found");
@@ -964,6 +977,12 @@ async function serveStatic(req, res) {
   } catch {
     sendText(res, 404, "Not found");
   }
+}
+
+function isPathInside(candidate, root) {
+  const resolvedCandidate = path.resolve(candidate);
+  const resolvedRoot = path.resolve(root);
+  return resolvedCandidate === resolvedRoot || resolvedCandidate.startsWith(`${resolvedRoot}${path.sep}`);
 }
 
 function readJson(req) {

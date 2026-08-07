@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>项目推荐卡生成器</title>
+    <link rel="stylesheet" href="./styles.css">
+    <script defer src="./app.js"></script>
+  </head>
+  <body>
+    <div class="phone-bg"></div>
+    <div class="phone-shell">
+      <header class="mobile-topbar">
+        <div class="brand-lockup">
+          <span class="brand-mark" aria-hidden="true">产</span>
+          <div>
+            <strong>项目推荐卡生成器</strong>
+            <span>AI 招商工作台</span>
+          </div>
+        </div>
+        <button id="accountBtn" type="button" class="account-chip">账号</button>
+      </header>
+
+      <main class="mobile-main">
+        <section id="workspaceView" class="view active workspace-view">
+          <section class="hero-panel">
+            <div class="preview-card">
+              <div class="preview-head">
+                <div>
+                  <span>实时预览</span>
+                  <strong>招商推荐卡</strong>
+                </div>
+                <div class="preview-tools">
+                  <button id="prevPreviewBtn" type="button" class="icon-btn" title="上一张">‹</button>
+                  <button id="nextPreviewBtn" type="button" class="icon-btn" title="下一张">›</button>
+                  <button id="zoomPreviewBtn" type="button" class="tool-btn" title="放大查看">看大</button>
+                  <button id="regenerateBtn" type="button" class="tool-btn" title="只重生成当前推荐卡">重绘</button>
+                </div>
+              </div>
+              <div id="resultGrid" class="preview-stage empty"></div>
+            </div>
+
+            <div class="hero-copy">
+              <span class="eyebrow">AI 生成</span>
+              <h1>AI招商卡生成工作台</h1>
+              <p>粘贴项目说明，生成可直接转发的产业园招商推荐卡。</p>
+            </div>
+
+            <button id="generateBtn" class="primary" disabled>开始生成</button>
+            <div id="validationBox" class="notice muted">等待粘贴项目资料。项目图片为可选项；未上传时会使用默认画面生成。</div>
+          </section>
+
+          <section class="input-stack">
+            <article class="mobile-card upload-card">
+              <div class="card-title">
+                <span class="card-icon excel-icon">文</span>
+                <div>
+                  <h2>项目资料</h2>
+                  <p>自由粘贴客户希望呈现的项目说明。</p>
+                </div>
+              </div>
+              <textarea id="projectTextInput" class="project-textarea" rows="8" placeholder="请自由提供项目名、面积、价格、用电量、通勤距离、生活配套等客户希望了解的信息，粘贴进文本框。"></textarea>
+              <div class="optional-contact-grid" aria-label="可选联系信息">
+                <label>
+                  <span>联系人 <em>可选</em></span>
+                  <input id="contactNameInput" type="text" placeholder="例如：招商经理">
+                </label>
+                <label>
+                  <span>联系电话 <em>可选</em></span>
+                  <input id="contactPhoneInput" type="tel" placeholder="例如：138 0000 0000">
+                </label>
+              </div>
+              <input id="excelInput" class="legacy-file-input" type="file" accept=".xlsx,.xls,.csv" tabindex="-1" aria-hidden="true">
+              <button id="parseBtn" class="secondary">整理资料</button>
+            </article>
+
+            <article class="mobile-card upload-card">
+              <div class="card-title">
+                <span class="card-icon image-icon">图</span>
+                <div>
+                  <h2>展示 <em>可选</em></h2>
+                  <p>可作为画面素材；不上传也可以生成。</p>
+                </div>
+              </div>
+              <label class="upload-drop" for="imageInput">
+                <input id="imageInput" type="file" accept="image/*">
+                <span><b>添加园区图片</b><small>非必填，限 1 张，8MB 以内</small></span>
+              </label>
+            </article>
+
+            <article class="mobile-card">
+              <div class="card-title">
+                <span class="card-icon style-icon">精</span>
+                <div>
+                  <h2>生成风格</h2>
+                  <p>选择配色；同次生成保持一致。</p>
+                </div>
+              </div>
+              <div class="style-lock" aria-label="当前生成风格">
+                <strong id="stylePresetName">精致 · 白金</strong>
+                <span id="stylePresetHint">单重点、克制高级、适合直接转发</span>
+              </div>
+              <div id="stylePresetGrid" class="style-preset-grid" aria-label="配色方案"></div>
+            </article>
+
+            <div id="previewTable" class="mobile-card table-empty">暂无已整理资料。</div>
+          </section>
+
+          <section id="examplesSection" class="examples-section" hidden>
+            <div class="section-head">
+              <div>
+                <span class="eyebrow">示例</span>
+                <h2>生成效果</h2>
+              </div>
+            </div>
+            <div class="example-strip" aria-label="生成案例">
+              <article class="example-card">
+                <img src="./assets/examples/sample-shunbei.png" alt="顺北睿创产业园项目推荐卡案例">
+                <strong>顺北睿创产业园</strong>
+              </article>
+              <article class="example-card">
+                <img src="./assets/examples/sample-laiyin.png" alt="莱茵科技园项目推荐卡案例">
+                <strong>莱茵科技园</strong>
+              </article>
+              <article class="example-card">
+                <img src="./assets/examples/sample-jingmi.png" alt="精密仪器科技园项目推荐卡案例">
+                <strong>精密仪器科技园</strong>
+              </article>
+            </div>
+          </section>
+
+          <div id="authPanel" class="auth-panel"></div>
+        </section>
+
+        <section id="historyView" class="view history-view">
+          <div class="section-head">
+            <div>
+              <span class="eyebrow">我的生成</span>
+              <h1>生成记录</h1>
+              <p>员工账号下的历史生成记录和可追溯生成码。</p>
+            </div>
+          </div>
+          <div id="historyList" class="gallery-grid"></div>
+        </section>
+
+        <section id="adminView" class="view admin-view">
+          <div id="adminPanel"></div>
+        </section>
+      </main>
+
+      <nav class="bottom-tabs compact-tabs" aria-label="底部导航">
+        <button type="button" class="nav-btn active" data-view="workspace">
+          <span class="tab-icon work-icon"></span>
+          工作台
+        </button>
+        <button type="button" class="nav-btn" data-view="history">
+          <span class="tab-icon history-icon"></span>
+          我的生成
+        </button>
+        <button id="examplesNavBtn" type="button" class="nav-btn" data-view="workspace" hidden>
+          <span class="tab-icon sample-icon"></span>
+          示例
+        </button>
+      </nav>
+    </div>
+  </body>
+</html>

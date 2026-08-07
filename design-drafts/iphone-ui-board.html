@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>项目推荐卡工具 iPhone 风格设计稿</title>
+    <style>
+      :root {
+        --bg: #e8f3fb;
+        --ink: #072b63;
+        --muted: #6b7f96;
+        --line: rgba(121, 154, 184, .34);
+        --accent: #00989b;
+        --blue: #004b91;
+        --deep: #002d68;
+        --gold: #f7d981;
+        --glass: rgba(255,255,255,.76);
+        --shadow: 0 28px 80px rgba(13, 56, 99, .16);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", Arial, sans-serif;
+        color: var(--ink);
+        background:
+          linear-gradient(135deg, rgba(255,255,255,.72) 0 14%, transparent 14%),
+          radial-gradient(circle at 82% 8%, rgba(0,152,155,.18), transparent 26%),
+          linear-gradient(180deg, #f8fcff, var(--bg));
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background-image: radial-gradient(circle, rgba(0,75,145,.12) 2px, transparent 2px);
+        background-size: 28px 28px;
+        mask-image: linear-gradient(90deg, black, transparent 46%);
+      }
+
+      .board {
+        width: min(1680px, calc(100vw - 48px));
+        margin: 0 auto;
+        padding: 34px 0 54px;
+      }
+
+      .titlebar {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: end;
+        gap: 24px;
+        margin-bottom: 28px;
+      }
+
+      .kicker {
+        width: fit-content;
+        padding: 7px 12px;
+        border: 1px solid rgba(0,152,155,.22);
+        border-radius: 999px;
+        color: #00777b;
+        background: rgba(255,255,255,.7);
+        font-size: 13px;
+        font-weight: 900;
+      }
+
+      h1 {
+        margin: 12px 0 8px;
+        color: var(--deep);
+        font-size: clamp(34px, 4vw, 62px);
+        line-height: 1.04;
+        letter-spacing: 0;
+      }
+
+      .lead {
+        max-width: 760px;
+        margin: 0;
+        color: #49657f;
+        font-size: 18px;
+        line-height: 1.65;
+      }
+
+      .legend {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      .legend span {
+        padding: 9px 12px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: rgba(255,255,255,.66);
+        color: var(--blue);
+        font-weight: 900;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 22px;
+        align-items: start;
+      }
+
+      .shot {
+        border: 1px solid rgba(255,255,255,.78);
+        border-radius: 30px;
+        padding: 12px;
+        background: linear-gradient(180deg, rgba(255,255,255,.72), rgba(230,244,255,.62));
+        box-shadow: var(--shadow);
+      }
+
+      .phone {
+        overflow: hidden;
+        aspect-ratio: 390 / 844;
+        border-radius: 24px;
+        background:
+          linear-gradient(180deg, rgba(255,255,255,.92), rgba(239,248,255,.96));
+        border: 1px solid rgba(0,45,104,.12);
+      }
+
+      .desktop {
+        aspect-ratio: 390 / 620;
+      }
+
+      .status {
+        height: 34px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0 20px;
+        color: var(--deep);
+        font-size: 12px;
+        font-weight: 900;
+      }
+
+      .screen {
+        padding: 16px;
+      }
+
+      .navtop {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 14px;
+      }
+
+      .avatar {
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--accent), #62c9cb);
+      }
+
+      .screen h2 {
+        margin: 0;
+        color: var(--deep);
+        font-size: 25px;
+        line-height: 1.12;
+      }
+
+      .screen p {
+        margin: 7px 0 0;
+        color: var(--muted);
+        line-height: 1.45;
+        font-size: 13px;
+      }
+
+      .glass {
+        margin-top: 12px;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--glass);
+        box-shadow: 0 14px 34px rgba(13,56,99,.1);
+        backdrop-filter: blur(16px);
+      }
+
+      .cta {
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 14px;
+        color: #fff;
+        background: linear-gradient(135deg, var(--accent), #00aaa8);
+        font-weight: 900;
+        box-shadow: 0 14px 26px rgba(0,152,155,.22);
+      }
+
+      .ghost {
+        min-height: 42px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        color: var(--blue);
+        background: rgba(255,255,255,.82);
+        font-weight: 900;
+      }
+
+      .metric-row,
+      .action-row,
+      .mini-row {
+        display: grid;
+        gap: 10px;
+      }
+
+      .metric-row {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .metric {
+        padding: 13px;
+        border-radius: 16px;
+        background: rgba(255,255,255,.7);
+        border: 1px solid var(--line);
+      }
+
+      .metric strong {
+        display: block;
+        color: var(--deep);
+        font-size: 22px;
+      }
+
+      .metric span {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .sample-card {
+        overflow: hidden;
+        border-radius: 18px;
+        background: #fff;
+        border: 1px solid var(--line);
+      }
+
+      .sample-hero {
+        min-height: 96px;
+        padding: 13px;
+        color: #fff;
+        background:
+          linear-gradient(90deg, rgba(0,45,104,.96), rgba(0,75,145,.56)),
+          linear-gradient(135deg, #b7daf5, #f8fcff);
+      }
+
+      .sample-hero span {
+        display: block;
+        font-weight: 900;
+      }
+
+      .sample-hero strong {
+        display: block;
+        margin-top: 8px;
+        font-size: 26px;
+      }
+
+      .tag {
+        display: inline-flex;
+        margin: 10px;
+        min-height: 34px;
+        align-items: center;
+        padding: 0 15px;
+        border-radius: 999px;
+        color: #fff;
+        background: var(--accent);
+        font-weight: 900;
+      }
+
+      .price {
+        margin: 0 10px 10px;
+        padding: 10px;
+        border-radius: 14px;
+        color: #fff;
+        background: linear-gradient(90deg, var(--accent), var(--deep));
+      }
+
+      .price strong {
+        color: var(--gold);
+        font-size: 28px;
+      }
+
+      .filebox {
+        display: grid;
+        gap: 8px;
+        padding: 14px;
+        border: 1px dashed rgba(0,75,145,.3);
+        border-radius: 16px;
+        background: rgba(255,255,255,.7);
+      }
+
+      .filebox b {
+        color: var(--deep);
+      }
+
+      .table {
+        display: grid;
+        gap: 8px;
+      }
+
+      .tr {
+        display: grid;
+        grid-template-columns: 44px 1fr auto;
+        gap: 8px;
+        align-items: center;
+        padding: 10px;
+        border-radius: 14px;
+        background: rgba(255,255,255,.76);
+        border: 1px solid rgba(121,154,184,.26);
+        font-size: 12px;
+      }
+
+      .pill {
+        width: fit-content;
+        padding: 5px 8px;
+        border-radius: 999px;
+        color: #00777b;
+        background: #e5f8f9;
+        font-weight: 900;
+        font-size: 11px;
+      }
+
+      .progress {
+        height: 10px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #dceaf5;
+      }
+
+      .progress i {
+        display: block;
+        width: 62%;
+        height: 100%;
+        background: linear-gradient(90deg, var(--accent), #00b4ad);
+      }
+
+      .thumbs {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+      }
+
+      .thumb {
+        aspect-ratio: 4 / 5;
+        border-radius: 13px;
+        background:
+          linear-gradient(180deg, #d8edfb 0 34%, #fff 34% 100%);
+        border: 1px solid var(--line);
+        position: relative;
+      }
+
+      .thumb::after {
+        content: "";
+        position: absolute;
+        left: 9px;
+        right: 9px;
+        bottom: 12px;
+        height: 20px;
+        border-radius: 6px;
+        background: linear-gradient(90deg, var(--accent), var(--deep));
+      }
+
+      .history {
+        display: grid;
+        gap: 10px;
+      }
+
+      .history-item {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+        padding: 12px;
+        border-radius: 16px;
+        background: rgba(255,255,255,.76);
+        border: 1px solid var(--line);
+      }
+
+      .side-layout {
+        display: grid;
+        grid-template-columns: 96px 1fr;
+        height: calc(100% - 34px);
+      }
+
+      .sidebar {
+        padding: 16px 10px;
+        color: #fff;
+        background: linear-gradient(180deg, var(--deep), var(--blue));
+      }
+
+      .sidebar b {
+        display: block;
+        margin-bottom: 16px;
+      }
+
+      .side-pill {
+        margin-bottom: 8px;
+        padding: 8px;
+        border-radius: 12px;
+        background: rgba(255,255,255,.14);
+        font-size: 12px;
+        font-weight: 900;
+      }
+
+      .admin-main {
+        padding: 16px;
+      }
+
+      .admin-table {
+        display: grid;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .admin-row {
+        display: grid;
+        grid-template-columns: 1.2fr .8fr .8fr;
+        gap: 8px;
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(255,255,255,.78);
+        font-size: 12px;
+      }
+
+      .caption {
+        margin-top: 12px;
+        color: var(--blue);
+        text-align: center;
+        font-weight: 900;
+      }
+
+      @media (max-width: 1180px) {
+        .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
+
+      @media (max-width: 680px) {
+        .board { width: min(100vw - 20px, 1680px); }
+        .titlebar { grid-template-columns: 1fr; }
+        .legend { justify-content: flex-start; }
+        .grid { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="board">
+      <section class="titlebar">
+        <div>
+          <div class="kicker">Image 2 初稿方向，本地可打开设计看板</div>
+          <h1>项目推荐卡工具界面方案</h1>
+          <p class="lead">客户前端采用 iPhone 风格，管理端采用 iPad / 桌面工作台风格。整体围绕蓝白产业园视觉、青绿主按钮、玻璃卡片和清晰业务链路展开。</p>
+        </div>
+        <div class="legend">
+          <span>客户前端 6 页</span>
+          <span>管理端 2 页</span>
+          <span>蓝白 iOS 风格</span>
+        </div>
+      </section>
+
+      <section class="grid">
+        <article class="shot">
+          <div class="phone">
+            <div class="status"><span>9:41</span><span>会员中心</span></div>
+            <div class="screen">
+              <div class="navtop"><h2>官网会员中心</h2><div class="avatar"></div></div>
+              <p>你的公司工具和生成权益</p>
+              <div class="glass">
+                <div class="metric-row">
+                  <div class="metric"><strong>30天</strong><span>有效期</span></div>
+                  <div class="metric"><strong>无限</strong><span>推荐卡生成</span></div>
+                </div>
+              </div>
+              <div class="glass">
+                <h2>项目推荐卡工具</h2>
+                <p>上传 Excel 和项目图，一键生成招商推荐物料。</p>
+                <div style="height:12px"></div>
+                <div class="cta">进入工具</div>
+              </div>
+            </div>
+          </div>
+          <div class="caption">1. 会员中心入口</div>
+        </article>
+
+        <article class="shot">
+          <div class="phone">
+            <div class="status"><span>9:41</span><span>工具首页</span></div>
+            <div class="screen">
+              <h2>项目推荐卡生成器</h2>
+              <p>先看效果，再上传资料生成。</p>
+              <div class="glass sample-card">
+                <div class="sample-hero"><span>项目推荐卡</span><strong>莱茵科技园</strong></div>
+                <div class="tag">地铁通勤优选</div>
+                <div class="price">2300㎡月租金 <strong>55,200</strong> 元/月</div>
+              </div>
+              <div class="action-row">
+                <div class="cta">上传 Excel</div>
+                <div class="ghost">上传项目图片</div>
+              </div>
+            </div>
+          </div>
+          <div class="caption">2. 工具首页</div>
+        </article>
+
+        <article class="shot">
+          <div class="phone">
+            <div class="status"><span>9:41</span><span>上传校验</span></div>
+            <div class="screen">
+              <h2>批次校验</h2>
+              <p>确认字段完整和图片匹配。</p>
+              <div class="glass">
+                <div class="filebox"><b>项目推荐卡模板.xlsx</b><span>3 行项目，字段完整</span></div>
+                <div style="height:12px"></div>
+                <div class="table">
+                  <div class="tr"><b>01</b><span>莱茵科技园</span><i class="pill">已匹配</i></div>
+                  <div class="tr"><b>02</b><span>顺北睿创产业园</span><i class="pill">已匹配</i></div>
+                  <div class="tr"><b>03</b><span>精密仪器科技园</span><i class="pill">已匹配</i></div>
+                </div>
+              </div>
+              <div class="cta">确认生成</div>
+            </div>
+          </div>
+          <div class="caption">3. 上传校验</div>
+        </article>
+
+        <article class="shot">
+          <div class="phone">
+            <div class="status"><span>9:41</span><span>生成中</span></div>
+            <div class="screen">
+              <h2>正在生成</h2>
+              <p>当前批次会归档到你的个人记录。</p>
+              <div class="glass">
+                <div class="metric-row">
+                  <div class="metric"><strong>2/3</strong><span>已完成</span></div>
+                  <div class="metric"><strong>PC</strong><span>生成码写入</span></div>
+                </div>
+                <div style="height:16px"></div>
+                <div class="progress"><i></i></div>
+                <p>正在绘制顺北睿创产业园</p>
+              </div>
+              <div class="ghost">稍后在我的生成查看</div>
+            </div>
+          </div>
+          <div class="caption">4. 生成中</div>
+        </article>
+
+        <article class="shot">
+          <div class="phone">
+            <div class="status"><span>9:41</span><span>生成结果</span></div>
+            <div class="screen">
+              <h2>生成完成</h2>
+              <p>3 张推荐卡已生成，可直接复制或保存图片。</p>
+              <div class="glass">
+                <div class="thumbs"><div class="thumb"></div><div class="thumb"></div><div class="thumb"></div></div>
+                <p>PC-260725-SAMPLE-001 等 3 个生成码</p>
+              </div>
+              <div class="action-row">
+                <div class="cta">查看图片</div>
+                <div class="ghost">复制生成码</div>
+              </div>
+            </div>
+          </div>
+          <div class="caption">5. 生成结果</div>
+        </article>
+
+        <article class="shot">
+          <div class="phone">
+            <div class="status"><span>9:41</span><span>我的生成</span></div>
+            <div class="screen">
+              <h2>我的生成</h2>
+              <p>只显示当前会员自己的批次。</p>
+              <div class="history">
+                <div class="history-item"><div><b>推荐卡批次</b><p>3 张，今天 16:20</p></div><span class="pill">下载</span></div>
+                <div class="history-item"><div><b>产业园招商</b><p>12 张，昨天 18:40</p></div><span class="pill">查看</span></div>
+                <div class="history-item"><div><b>佛山项目清单</b><p>8 张，7月23日</p></div><span class="pill">查看</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="caption">6. 我的生成</div>
+        </article>
+
+        <article class="shot">
+          <div class="phone desktop">
+            <div class="status"><span>9:41</span><span>管理端</span></div>
+            <div class="side-layout">
+              <div class="sidebar"><b>管理</b><div class="side-pill">公司权益</div><div class="side-pill">成员</div><div class="side-pill">生成记录</div></div>
+              <div class="admin-main">
+                <h2>公司权益</h2>
+                <p>创建公司码、有效期和次数。</p>
+                <div class="admin-table">
+                  <div class="admin-row"><b>演示公司</b><span>30天</span><i class="pill">启用</i></div>
+                  <div class="admin-row"><b>睿创园区</b><span>100次</span><i class="pill">启用</i></div>
+                  <div class="admin-row"><b>精密仪器</b><span>到期</span><i class="pill">停用</i></div>
+                </div>
+                <div style="height:12px"></div>
+                <div class="cta">新建公司</div>
+              </div>
+            </div>
+          </div>
+          <div class="caption">7. 管理端公司权益</div>
+        </article>
+
+        <article class="shot">
+          <div class="phone desktop">
+            <div class="status"><span>9:41</span><span>溯源</span></div>
+            <div class="side-layout">
+              <div class="sidebar"><b>管理</b><div class="side-pill">溯源</div><div class="side-pill">批次</div><div class="side-pill">日志</div></div>
+              <div class="admin-main">
+                <h2>生成码溯源</h2>
+                <p>反查公司、员工、Excel 行号。</p>
+                <div class="glass">
+                  <b>PC-260725-SAMPLE-001</b>
+                  <p>公司：演示公司</p>
+                  <p>员工：王经理</p>
+                  <p>Excel：第 2 行</p>
+                </div>
+                <div class="glass sample-card">
+                  <div class="sample-hero"><span>项目推荐卡</span><strong>莱茵科技园</strong></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="caption">8. 管理端生成码溯源</div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

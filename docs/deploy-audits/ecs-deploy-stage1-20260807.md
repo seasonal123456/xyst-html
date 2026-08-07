@@ -2,7 +2,7 @@
 
 时间：2026-08-07 Asia/Shanghai
 
-状态：工具服务与 HTTP Nginx 入口已部署，等待 DNS 与 HTTPS。未修改 AI 官网代码、生产 env、PM2 配置、数据库或 Feishu Codex 配置。
+状态：工具服务、DNS、Nginx 与 HTTPS 已部署并通过公网验收。未修改 AI 官网代码、生产 env、PM2 配置、数据库或 Feishu Codex 配置。
 
 ## 已执行变更
 
@@ -16,6 +16,8 @@
 - 创建并启用：`project-card-tool.service`。
 - 新增 Nginx 配置：`/etc/nginx/conf.d/project-card-tool.conf`。
 - Nginx 语法检查通过并 reload。
+- 新增 DNS A 记录：`card.xinyingst.com -> 8.138.148.34`，TTL 10 分钟。
+- 为 `card.xinyingst.com` 签发并部署 Let's Encrypt 证书。
 
 ## 验收结果
 
@@ -29,15 +31,24 @@
 - SSO 配置：已配置，密钥仅保存在服务器私密 env。
 - 生成元数据静态访问：`403`。
 - 使用本机 Host 解析测试 Nginx：`card.xinyingst.com` HTTP 入口可反代到工具 readiness。
+- 公网 `https://card.xinyingst.com/api/ready` 返回 `HTTP 200` 与 `ok: true`。
+- 公网 `http://card.xinyingst.com/` 返回 `301` 并跳转 HTTPS。
+- 证书仅覆盖 `card.xinyingst.com`，有效期至 `2026-11-05`。
+- `223.5.5.5` 与 `1.1.1.1` 均解析到 `8.138.148.34`。
+- BB Browser 已实际打开公网工具页并识别表单、联系人、图片上传、12 套配色与底部导航。
 - 旧官网 `xinyingst.com`、登录页与 `bridge.xinyingst.com` 均保持 `HTTP 200`。
 - AI 官网 PM2 `xinyingst-ai-site` 与 `feishu-codex.service` 保持在线。
 
 ## 尚未执行
 
-- `card.xinyingst.com` 尚无 DNS A 记录。
-- 尚未为 `card.xinyingst.com` 申请 HTTPS 证书。
 - 尚未修改 AI 官网生产配置接入项目推荐卡 SSO 入口。
 - 尚未执行公网真实生图端到端验收。
+
+## 证书网络说明
+
+ECS 直连 Let's Encrypt ACME 地址时出现网络超时。首次签发通过临时本机 HTTP CONNECT 代理和 SSH 回环转发完成；代理与转发已在签发后关闭，ECS 和本机均无临时端口残留。
+
+Certbot 已安装自动续期任务，但如果 ECS 到 Let's Encrypt 的出站网络长期不恢复，自动续期可能失败。应在证书到期前至少 30 天检查 `certbot renew`，必要时复用临时回环代理方式续期；不得把临时代理长期暴露到公网。
 
 ## 回滚
 
@@ -53,6 +64,6 @@ release、env、数据和日志默认保留，避免误删生成记录。需要�
 
 ## 下一审批点
 
-1. 在阿里云 DNS 新增 `card.xinyingst.com -> 8.138.148.34`。
-2. DNS 生效后申请 HTTPS 并做公网验收。
-3. 工具公网通过后，单独审批修改 AI 官网生产 env 与重启 PM2，实现会员中心 SSO 跳转。
+1. 单独审批修改 AI 官网生产 env 与重启 PM2，实现会员中心 SSO 跳转。
+2. 通过官网会员入口执行公网真实生图端到端验收。
+3. 将证书续期检查加入上线后运维清单。

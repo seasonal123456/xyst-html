@@ -58,6 +58,7 @@
     if (!ssoAttempted && appConfig.demoSessionEnabled) ensureLocalDemoSession();
     bindNav();
     bindWorkspace();
+    restoreProjectDraft();
     renderAll();
   }
 
@@ -80,6 +81,12 @@
       jobs: [],
       cards: [],
       usageLogs: [],
+      projectDraft: {
+        projectText: "",
+        contactName: "",
+        contactPhone: "",
+        updatedAt: ""
+      },
       selectedVisualPresetCode: "WG",
       sessionToken: ""
     };
@@ -383,7 +390,35 @@
     if ($("exportBtn")) $("exportBtn").addEventListener("click", exportCurrentPreview);
   }
 
+  function restoreProjectDraft() {
+    const draft = state.projectDraft || {};
+    const projectTextInput = $("projectTextInput");
+    const contactNameInput = $("contactNameInput");
+    const contactPhoneInput = $("contactPhoneInput");
+    if (projectTextInput && draft.projectText) projectTextInput.value = draft.projectText;
+    if (contactNameInput && draft.contactName) contactNameInput.value = draft.contactName;
+    if (contactPhoneInput && draft.contactPhone) contactPhoneInput.value = draft.contactPhone;
+    if (draft.projectText && $("validationBox")) {
+      $("validationBox").className = "notice muted";
+      $("validationBox").textContent = "已保留上次项目资料，可直接修改或重新整理后生成。";
+    }
+  }
+
+  function saveProjectDraftFromInputs() {
+    const projectText = ($("projectTextInput")?.value || "").trim();
+    const contactName = ($("contactNameInput")?.value || "").trim();
+    const contactPhone = ($("contactPhoneInput")?.value || "").trim();
+    state.projectDraft = {
+      projectText,
+      contactName,
+      contactPhone,
+      updatedAt: projectText || contactName || contactPhone ? new Date().toISOString() : ""
+    };
+    saveState();
+  }
+
   function markProjectInputsDirty() {
+    saveProjectDraftFromInputs();
     if (!currentBatch && !currentRows.length) return;
     currentRows = [];
     currentBatch = null;
@@ -555,6 +590,7 @@
     const file = fileInput && fileInput.files ? fileInput.files[0] : null;
     try {
       if (projectText) {
+        saveProjectDraftFromInputs();
         currentRows = [parseProjectText(projectText, { contactName, contactPhone })];
         const validation = validateRows(currentRows);
         const company = currentCompany();

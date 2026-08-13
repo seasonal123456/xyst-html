@@ -30,8 +30,8 @@ const SSO_USED_JTI_FILE = path.join(DATA_DIR, "sso-used-jti.json");
 const MAX_JSON_BODY_BYTES = 16_000_000;
 const MAX_SOURCE_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_SOURCE_TEXT_CHARS = 20_000;
-const IMAGE_API_REQUEST_TIMEOUT_MS = Number(process.env.IMAGE_API_REQUEST_TIMEOUT_MS || 260_000);
-const IMAGE_API_RETRY_COUNT = Math.max(1, Math.min(3, Number(process.env.IMAGE_API_RETRY_COUNT || 3)));
+const IMAGE_API_REQUEST_TIMEOUT_MS = Number(process.env.IMAGE_API_REQUEST_TIMEOUT_MS || 220_000);
+const IMAGE_API_RETRY_COUNT = Math.max(1, Math.min(3, Number(process.env.IMAGE_API_RETRY_COUNT || 1)));
 const APP_ENV = process.env.PROJECT_CARD_ENV || process.env.NODE_ENV || "development";
 const IS_PRODUCTION = /^(production|prod)$/i.test(APP_ENV);
 const DEMO_SESSION_ENABLED = !IS_PRODUCTION && process.env.PROJECT_CARD_ALLOW_DEMO_SESSION !== "false";
@@ -416,6 +416,10 @@ async function callImageApiWithRetry(endpoint, apiBody) {
       lastError = error;
       logError(`IMAGE_API_FETCH_ATTEMPT_${attempt}_FAILED`, error);
       if (error.retryable === false) throw error;
+      if (error.providerStatus || error.timeout) {
+        if (attempt < IMAGE_API_RETRY_COUNT) await sleep(1200 * attempt);
+        continue;
+      }
     }
 
     try {
@@ -426,12 +430,14 @@ async function callImageApiWithRetry(endpoint, apiBody) {
       if (error.retryable === false) throw error;
     }
 
-    try {
-      return await callImageApiWithPowerShell(endpoint, apiBody);
-    } catch (error) {
-      lastError = error;
-      logError(`IMAGE_API_POWERSHELL_ATTEMPT_${attempt}_FAILED`, error);
-      if (error.retryable === false) throw error;
+    if (process.platform === "win32") {
+      try {
+        return await callImageApiWithPowerShell(endpoint, apiBody);
+      } catch (error) {
+        lastError = error;
+        logError(`IMAGE_API_POWERSHELL_ATTEMPT_${attempt}_FAILED`, error);
+        if (error.retryable === false) throw error;
+      }
     }
 
     if (attempt < IMAGE_API_RETRY_COUNT) {
@@ -442,15 +448,23 @@ async function callImageApiWithRetry(endpoint, apiBody) {
 }
 
 async function callImageApiWithFetch(endpoint, apiBody) {
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${API_KEY}`
-    },
-    body: JSON.stringify(apiBody),
-    signal: AbortSignal.timeout(IMAGE_API_REQUEST_TIMEOUT_MS)
-  });
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${API_KEY}`
+      },
+      body: JSON.stringify(apiBody),
+      signal: AbortSignal.timeout(IMAGE_API_REQUEST_TIMEOUT_MS)
+    });
+  } catch (error) {
+    if (isFetchTimeoutError(error)) {
+      throw providerTransportError("生图接口响应超时，可能是上游正在排队或临时拥堵。", { timeout: true });
+    }
+    throw providerTransportError(error.message || "生图接口连接失败。");
+  }
   const text = await response.text();
   if (!response.ok) throw providerHttpError(response.status, text);
   return parseImageApiJson(text);
@@ -529,10 +543,15 @@ function providerHttpError(status, text) {
   return error;
 }
 
-function providerTransportError(message) {
+function providerTransportError(message, options = {}) {
   const error = new Error(message || "Image API transport failed.");
   error.retryable = true;
+  if (options.timeout) error.timeout = true;
   return error;
+}
+
+function isFetchTimeoutError(error) {
+  return error && (error.name === "TimeoutError" || error.code === "ABORT_ERR");
 }
 
 function escapeCurlConfig(value) {
@@ -887,11 +906,18 @@ async function readTraceIndex() {
 
 async function writeTraceIndex(index) {
   await fs.mkdir(path.dirname(TRACE_INDEX_FILE), { recursive: true });
-  await fs.writeFile(TRACE_INDEX_FILE, JSON.stringify({
+  const contents = JSON.stringify({
     version: 1,
     updatedAt: new Date().toISOString(),
     cards: (index.cards || []).slice(0, 5000)
-  }, null, 2), "utf8");
+  }, null, 2);
+  const tempPath = `${TRACE_INDEX_FILE}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(tempPath, `${contents}\n`, { encoding: "utf8", mode: 0o640 });
+    await fs.rename(tempPath, TRACE_INDEX_FILE);
+  } finally {
+    await fs.rm(tempPath, { force: true }).catch(() => {});
+  }
 }
 
 async function upsertTraceIndexCard(metaPath, meta) {
@@ -1087,6 +1113,12 @@ function publicImageApiError(error) {
   }
   if (error && error.providerStatus === 429) {
     return "生图接口当前繁忙或额度受限，请稍后重试。";
+  }
+  if (error && [502, 503, 504].includes(error.providerStatus)) {
+    return "生图接口上游排队或超时，本次没有生成成功，也不会产生有效结果。请稍后再点一次生成。";
+  }
+  if (error && error.timeout) {
+    return "生图接口响应超时，本次没有生成成功，也不会产生有效结果。请稍后再点一次生成。";
   }
   if (error && error.retryable === false) {
     return error.message || "生图接口拒绝了本次请求，请检查提交内容后重试。";

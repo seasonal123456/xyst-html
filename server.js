@@ -167,6 +167,7 @@ function validateStartupConfig() {
   if (IS_PRODUCTION && !SSO_SECRET) missing.push("PROJECT_CARD_SSO_SECRET");
   if (IS_PRODUCTION && !API_BASE_URL) missing.push("IMAGE_API_BASE_URL");
   if (IS_PRODUCTION && !API_KEY) missing.push("IMAGE_API_KEY");
+  if (IS_PRODUCTION && !isImage2Model(IMAGE_MODEL)) missing.push("IMAGE_API_MODEL=gpt-image-2");
   if (!missing.length) return;
 
   const message = `Production startup blocked. Missing required env: ${missing.join(", ")}`;
@@ -178,6 +179,7 @@ function validateStartupConfig() {
 async function handleReady(req, res) {
   const checks = {
     imageApiConfigured: Boolean(API_BASE_URL && API_KEY),
+    image2ModelConfigured: isImage2Model(IMAGE_MODEL),
     ssoConfigured: Boolean(SSO_SECRET),
     storageWritable: await canWriteStorage(),
     demoSessionDisabledForProduction: !IS_PRODUCTION || !DEMO_SESSION_ENABLED,
@@ -220,6 +222,12 @@ async function handleGenerateCard(req, res) {
     return sendJson(res, 503, {
       ok: false,
       error: "真实生图接口未配置，请设置 IMAGE_API_BASE_URL 和 IMAGE_API_KEY 后重启服务。"
+    });
+  }
+  if (!isImage2Model(IMAGE_MODEL)) {
+    return sendJson(res, 503, {
+      ok: false,
+      error: "生图模型未配置为 Image 2，请设置 IMAGE_API_MODEL=gpt-image-2 后重启服务。"
     });
   }
 
@@ -354,11 +362,16 @@ function buildProjectCardPrompt(p) {
   const contactName = cleanPromptLine(p.contactName || "");
   const contactPhone = cleanPromptLine(p.contactPhone || "");
   const contactLine = [contactName, contactPhone].filter(Boolean).join(" ");
+  const layoutDirection = pickLayoutDirection(`${p.traceCode || ""}:${sourceText}:${Date.now()}`);
 
   return [
-    "请生成 1 张 4:5 竖版中文招商项目推荐卡，可直接通过微信发给客户。",
+    "请使用 Image 2 生成 1 张完整的 4:5 竖版中文招商项目推荐卡，可直接通过微信发给客户。",
     "只使用用户提供的文案信息，可以提炼成短标题、标签和重点数字，但不要添加文案中没有的事实。",
     "设计高级简洁，手机端易读，突出一个最有价值的主卖点；可以使用轻微抠像、叠层、毛玻璃、柔和阴影和留白。",
+    "不要套用固定模板，不要每次都做成同一套蓝色斜切建筑加大数字结构。请根据本次文案主动变化构图、主视觉位置、信息卡数量、标题层级和留白比例。",
+    `本次版式方向：${layoutDirection}`,
+    "严格排版安全要求：所有中文、数字、单位、姓名和电话必须完整留在画布内，距离画布边缘至少 80px；不得裁切、溢出、贴边、压住建筑主体或超出玻璃面板。",
+    "如果文字较多，请优先精简成短句、减少模块、缩小但保持可读，绝对不要让任何文字出框。联系电话必须完整准确，不要断行到画布外。",
     colorScheme ? `配色：${colorScheme}` : "",
     focusCondition ? `优先突出的主卖点：${focusCondition}` : "",
     visualDirection ? `风格：${visualDirection}` : "",
@@ -366,8 +379,31 @@ function buildProjectCardPrompt(p) {
     `用户文案：${sourceText}`,
     contactLine ? `可选联系信息：${contactLine}` : "",
     "",
-    "不要出现生成码、追踪码、水印、二维码、供应商品牌、API 名称、模型名称、网页按钮、上传控件、Excel 痕迹或提示词内容。没有的信息不要展示。"
+    "不要出现生成码、追踪码、水印、二维码、供应商品牌、API 名称、模型名称、无关英文、网页按钮、上传控件、Excel 痕迹或提示词内容。没有的信息不要展示。"
   ].filter(Boolean).join("\n");
+}
+
+function pickLayoutDirection(seed) {
+  const layouts = [
+    "大标题在上方，建筑或厂房主视觉偏下，核心数字做成一个宽玻璃浮层，辅助信息少量横排。",
+    "建筑主视觉占据上半部分，文字信息像杂志封面一样错落排布，核心条件用单个大数字强调。",
+    "左侧留白放标题和联系人，右侧或下方放厂房主视觉，参数用 3 到 5 个小胶囊标签组织。",
+    "中部大留白，核心卖点居中突出，其他信息分散在四周小玻璃块里，整体更轻、更高级。",
+    "采用高端地产海报构图，主标题和核心数字分成两个视觉区域，避免底部堆满小字。",
+    "采用商务信息卡构图，少量半透明面板叠在真实建筑氛围上，参数分组但不做表格。"
+  ];
+  const index = Math.abs(stableHash(seed)) % layouts.length;
+  return layouts[index];
+}
+
+function stableHash(value) {
+  return Array.from(String(value || "")).reduce((hash, char) => {
+    return ((hash << 5) - hash + char.charCodeAt(0)) | 0;
+  }, 0);
+}
+
+function isImage2Model(model) {
+  return /^(gpt-)?image-?2$/i.test(String(model || "").trim());
 }
 
 function cleanPromptLine(value) {

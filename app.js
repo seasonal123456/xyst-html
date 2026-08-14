@@ -668,24 +668,25 @@
   }
 
   function parseProjectText(text, options = {}) {
-    const compact = text.replace(/\s+/g, " ").trim();
+    const compact = normalizeProjectText(text);
     const sentences = compact.split(/[。；;！!？?\n]/).map((item) => item.trim()).filter(Boolean);
     const areaMatch = compact.match(/(\d+(?:\.\d+)?)\s*(?:㎡|平米|平方米|平方|平)(?!方公里)/);
     const unitRentMatch = compact.match(/(\d+(?:\.\d+)?)\s*元\s*(?:\/|每)?\s*(?:㎡|平米|平方米|平方|平)\s*(?:\/|每)?\s*月?/);
-    const totalRentMatch = compact.match(/(?:月租金|总月租金|月租|每月租金)[约为是：:\s]*(\d[\d,]*(?:\.\d+)?)/);
+    const totalRentMatch = compact.match(/(?:月租金|总月租金|月租|每月租金|租金(?:总价|报价)?)[约为是：:\s]*(\d[\d,]*(?:\.\d+)?)\s*(?:元)?(?:\/?月)?/);
     const area = areaMatch ? Number(areaMatch[1]) : 0;
     const unitRent = unitRentMatch ? Number(unitRentMatch[1]) : 0;
     const totalRent = totalRentMatch ? Number(totalRentMatch[1].replace(/,/g, "")) : 0;
     const monthlyRentAmount = totalRent || (area && unitRent ? Math.round(area * unitRent) : "");
     const powerSupply = extractSegment(compact, /用电量[约为是：:\s]*(\d+(?:\.\d+)?\s*(?:kva|kw|千伏安|千瓦))/i);
-    const locationSentence = extractSegment(compact, /位于([^，。；;]+)/) || extractSegment(compact, /地址[：:\s]*([^，。；;]+)/) || pickSentence(sentences, /区位|地铁口|附近|佛山|广州|番禺|南沙|顺德|陈村/);
+    const locationSentence = extractSegment(compact, /位于([^，。；;]+)/) || extractSegment(compact, /地址[：:\s]*([^，。；;]+)/) || extractLeadingLocation(compact) || pickShortSentence(sentences, /区位|地铁口|附近|佛山|广州|番禺|南沙|顺德|陈村|伦教/);
     const distanceTraffic = extractSegment(compact, /距离([^，。；;]+(?:分钟|公里|km|KM|车程))/);
     const metroTraffic = extractSegment(compact, /靠近([^，。；;]+(?:地铁|高铁|高速|南站|机场|港口))/);
     const trafficSentence = [distanceTraffic, metroTraffic].filter(Boolean).join("，") || pickSentence(sentences, /交通|地铁|高铁|高速|通勤|车程|南站|机场|港口/);
-    const environmentSentence = extractSegment(compact, /园区有([^。；;]+)/) || extractSegment(compact, /配套[：:\s]*([^。；;]+)/) || pickSentence(sentences, /配套|停车|宿舍|食堂|卸货|消防|层高|电梯|环境/);
+    const environmentSentence = extractSegment(compact, /园区有([^。；;]+)/) || extractSegment(compact, /配套[：:\s]*([^。；;]+)/) || extractFacilitySummary(compact);
     const featureSentence = extractSegment(compact, /适合([^。；;]+)/) || pickSentence(sentences, /适合|产业|行业|企业|制造|研发|办公|仓库|厂房|耗材|智能|科技/) || sentences[0] || compact;
     const projectName = extractProjectName(compact);
     const reason = pickSentence(sentences, /推荐|优势|适合|性价比|通勤|配套|区位/);
+    const rentQuote = unitRent ? `${unitRent}元/㎡/月` : (totalRent ? `${formatMoney(totalRent)}元/月` : "");
 
     return {
       rowIndex: 1,
@@ -696,7 +697,7 @@
       powerSupply: cleanField(powerSupply),
       southStationCommute: cleanField(/南站/.test(trafficSentence) ? trafficSentence : ""),
       cityDriveTime: cleanField(trafficSentence),
-      rentQuote: unitRent ? `${unitRent}元/㎡/月` : cleanField(pickSentence(sentences, /租金|报价|元|月租/)),
+      rentQuote,
       monthlyRentArea: area ? `${area}㎡` : "",
       monthlyRentAmount,
       environmentDescription: cleanField(environmentSentence),
@@ -709,6 +710,15 @@
       sourceText: compact,
       rawJson: { 项目资料: compact }
     };
+  }
+
+  function normalizeProjectText(text) {
+    return String(text || "")
+      .replace(/(\d+(?:\.\d+)?)\s*m2\b/ig, "$1㎡")
+      .replace(/㎡\s*m2\b/ig, "㎡")
+      .replace(/㎡\s*(?:㎡|平米|平方米|平方|平)\b/g, "㎡")
+      .replace(/\s+/g, " ")
+      .trim();
   }
 
   function pickSentence(sentences, pattern) {
@@ -728,6 +738,27 @@
     const park = text.match(/([^，。；;\n]{2,24}(?:产业园|科技园|工业园|仓库|厂房|项目|中心|基地|大厦|写字楼))/);
     if (park) return cleanField(park[1]);
     return "";
+  }
+
+  function extractLeadingLocation(text) {
+    const match = String(text || "").match(/^([\u4e00-\u9fa5A-Za-z0-9·-]{2,12}?)(?=\d+(?:\.\d+)?\s*(?:㎡|平米|平方米|平方|平))/);
+    return match ? cleanField(match[1]) : "";
+  }
+
+  function extractFacilitySummary(text) {
+    const parts = String(text || "")
+      .split(/[，,。；;、\n]/)
+      .map(cleanField)
+      .filter(Boolean);
+    const facilities = parts.filter((part) => {
+      if (/租金|报价|价格|面积|^\d+(?:\.\d+)?㎡/.test(part)) return false;
+      return /保安|岗亭|考勤|货梯|卸货|人货分流|车道|通道|宿舍|公寓|餐厅|食堂|停车|消防|排污|证件|配套/.test(part);
+    });
+    return facilities.slice(0, 5).join("，");
+  }
+
+  function pickShortSentence(sentences, pattern) {
+    return sentences.find((sentence) => pattern.test(sentence) && sentence.length <= 32 && !/租金|报价|价格/.test(sentence)) || "";
   }
 
   function cleanField(value) {

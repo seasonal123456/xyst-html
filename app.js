@@ -42,6 +42,9 @@
   let currentBatch = null;
   let currentGenerated = [];
   let currentPreviewIndex = 0;
+  const WEBSITE_ACCOUNT_URL = "https://xinyingst.com/account";
+  const WEBSITE_LOGIN_URL = "https://xinyingst.com/login?next=/account";
+  const WEBSITE_LOGOUT_URL = "https://xinyingst.com/api/auth/logout";
 
   const sampleCards = [
     { name: "顺北睿创产业园", tag: "高性价比优选", src: "./assets/examples/sample-shunbei.png" },
@@ -446,6 +449,7 @@
 
   function renderAll() {
     renderAuth();
+    renderAccountPanel();
     renderQuota();
     renderStylePresets();
     renderResultGrid();
@@ -471,6 +475,105 @@
         请从官网会员中心进入项目推荐卡生成器。直接打开本页可以整理资料和预览页面，但不能生成推荐卡。
       </div>
     `;
+  }
+
+  function renderAccountPanel() {
+    const panel = $("accountPanel");
+    if (!panel) return;
+    const user = currentUser();
+    const company = currentCompany();
+    if (!user || !company) {
+      panel.innerHTML = `
+        <article class="account-card-inner">
+          <div>
+            <span>当前账号</span>
+            <strong>未通过官网进入</strong>
+            <p>请先回到官网会员中心，选择项目推荐卡生成器进入。</p>
+          </div>
+          <div class="account-actions">
+            <button type="button" class="secondary" data-account-action="account">打开会员中心</button>
+            <button type="button" class="primary mini-primary" data-account-action="switch">切换账号</button>
+          </div>
+        </article>
+      `;
+      bindAccountActions();
+      updateAccountChip();
+      return;
+    }
+
+    panel.innerHTML = `
+      <article class="account-card-inner">
+        <div>
+          <span>当前账号</span>
+          <strong>${escapeHtml(user.name || user.phone || "官网会员")}</strong>
+          <p>${escapeHtml(company.name || "官网会员权益")} · ${escapeHtml(company.planType === "time_unlimited" ? `有效期至 ${company.validUntil}` : `剩余 ${company.creditsRemaining || 0} 次`)}</p>
+        </div>
+        <div class="account-actions">
+          <button type="button" class="secondary" data-account-action="account">返回会员中心</button>
+          <button type="button" class="secondary" data-account-action="local-logout">退出本工具</button>
+          <button type="button" class="primary mini-primary" data-account-action="switch">切换官网账号</button>
+        </div>
+      </article>
+    `;
+    bindAccountActions();
+    updateAccountChip();
+  }
+
+  function updateAccountChip() {
+    const button = $("accountBtn");
+    if (!button) return;
+    const user = currentUser();
+    button.textContent = user ? "账号" : "登录";
+  }
+
+  function bindAccountActions() {
+    document.querySelectorAll("[data-account-action]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const action = button.dataset.accountAction;
+        if (action === "account") {
+          window.location.href = WEBSITE_ACCOUNT_URL;
+        } else if (action === "local-logout") {
+          clearToolSession();
+          toast("已退出本工具，本地项目资料草稿仍保留。", "ok");
+        } else if (action === "switch") {
+          switchWebsiteAccount();
+        }
+      });
+    });
+  }
+
+  function clearToolSession() {
+    state.sessionUserId = null;
+    state.sessionToken = "";
+    state.users = state.users.map((user) => ({ ...user, sessionToken: "" }));
+    currentRows = [];
+    currentBatch = null;
+    currentGenerated = [];
+    saveState();
+    renderAll();
+    renderPreview();
+  }
+
+  function switchWebsiteAccount() {
+    clearToolSession();
+    try {
+      const iframe = document.createElement("iframe");
+      iframe.name = `logoutFrame_${Date.now()}`;
+      iframe.hidden = true;
+      document.body.appendChild(iframe);
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = WEBSITE_LOGOUT_URL;
+      form.target = iframe.name;
+      form.hidden = true;
+      document.body.appendChild(form);
+      form.submit();
+      setTimeout(() => {
+        window.location.href = WEBSITE_LOGIN_URL;
+      }, 650);
+    } catch {
+      window.location.href = WEBSITE_LOGIN_URL;
+    }
   }
 
   function ssoDemoLogin() {

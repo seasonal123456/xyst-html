@@ -668,25 +668,28 @@
   }
 
   function parseProjectText(text, options = {}) {
+    const rawLines = String(text || "").replace(/\r/g, "\n").split("\n").map(cleanField).filter(Boolean);
+    const heading = extractHeading(rawLines);
     const compact = normalizeProjectText(text);
     const sentences = compact.split(/[。；;！!？?\n]/).map((item) => item.trim()).filter(Boolean);
-    const areaMatch = compact.match(/(\d+(?:\.\d+)?)\s*(?:㎡|平米|平方米|平方|平)(?!方公里)/);
-    const unitRentMatch = compact.match(/(\d+(?:\.\d+)?)\s*元\s*(?:\/|每)?\s*(?:㎡|平米|平方米|平方|平)\s*(?:\/|每)?\s*月?/);
+    const areaMatch = compact.match(/(\d+(?:\.\d+)?)\s*(?:㎡|m²|m2|平米|平方米|平方|方|平)(?!方公里)/i);
+    const unitRentMatch = compact.match(/(\d+(?:\.\d+)?)\s*元\s*(?:\/|每)?\s*(㎡|m²|m2|m³|m3|立方|方|平米|平方米|平方|平)\s*(?:\/|每)?\s*(月)?/i);
     const totalRentMatch = compact.match(/(?:月租金|总月租金|月租|每月租金|租金(?:总价|报价)?)[约为是：:\s]*(\d[\d,]*(?:\.\d+)?)\s*(?:元)?(?:\/?月)?/);
     const area = areaMatch ? Number(areaMatch[1]) : 0;
     const unitRent = unitRentMatch ? Number(unitRentMatch[1]) : 0;
+    const unitRentUnit = unitRentMatch ? normalizeRentUnit(unitRentMatch[2], unitRentMatch[3]) : "";
     const totalRent = totalRentMatch ? Number(totalRentMatch[1].replace(/,/g, "")) : 0;
-    const monthlyRentAmount = totalRent || (area && unitRent ? Math.round(area * unitRent) : "");
-    const powerSupply = extractSegment(compact, /用电量[约为是：:\s]*(\d+(?:\.\d+)?\s*(?:kva|kw|千伏安|千瓦))/i);
-    const locationSentence = extractSegment(compact, /位于([^，。；;]+)/) || extractSegment(compact, /地址[：:\s]*([^，。；;]+)/) || extractLeadingLocation(compact) || pickShortSentence(sentences, /区位|地铁口|附近|佛山|广州|番禺|南沙|顺德|陈村|伦教/);
+    const monthlyRentAmount = totalRent || (area && unitRent && /㎡/.test(unitRentUnit) ? Math.round(area * unitRent) : "");
+    const powerSupply = extractSegment(compact, /(?:用电量|用电|配电|电)[约为是充足：:\s]*(\d+(?:\.\d+)?\s*(?:kva|kw|千伏安|千瓦))/i);
+    const locationSentence = extractSegment(compact, /位于([^，。；;]+)/) || extractSegment(compact, /地址[：:\s]*([^，。；;]+)/) || heading || extractLeadingLocation(compact) || pickShortSentence(sentences, /区位|地铁口|附近|佛山|广州|番禺|南沙|顺德|陈村|伦教|北滘/);
     const distanceTraffic = extractSegment(compact, /距离([^，。；;]+(?:分钟|公里|km|KM|车程))/);
     const metroTraffic = extractSegment(compact, /靠近([^，。；;]+(?:地铁|高铁|高速|南站|机场|港口))/);
-    const trafficSentence = [distanceTraffic, metroTraffic].filter(Boolean).join("，") || pickSentence(sentences, /交通|地铁|高铁|高速|通勤|车程|南站|机场|港口/);
+    const trafficSentence = [distanceTraffic, metroTraffic].filter(Boolean).join("，") || extractTrafficSummary(compact) || pickSentence(sentences, /交通|地铁|高铁|高速|通勤|车程|南站|机场|港口|物流/);
     const environmentSentence = extractSegment(compact, /园区有([^。；;]+)/) || extractSegment(compact, /配套[：:\s]*([^。；;]+)/) || extractFacilitySummary(compact);
-    const featureSentence = extractSegment(compact, /适合([^。；;]+)/) || pickSentence(sentences, /适合|产业|行业|企业|制造|研发|办公|仓库|厂房|耗材|智能|科技/) || sentences[0] || compact;
-    const projectName = extractProjectName(compact);
-    const reason = pickSentence(sentences, /推荐|优势|适合|性价比|通勤|配套|区位/);
-    const rentQuote = unitRent ? `${unitRent}元/㎡/月` : (totalRent ? `${formatMoney(totalRent)}元/月` : "");
+    const featureSentence = extractIndustrySummary(compact) || extractPropertySummary(compact) || extractSegment(compact, /适合([^。；;]+)/) || pickSentence(sentences, /适合|产业|行业|企业|制造|研发|办公|仓库|厂房|耗材|智能|科技|五金|食品|包装/) || sentences[0] || compact;
+    const projectName = extractProjectName(compact) || heading || "";
+    const reason = extractRecommendationSummary(compact) || pickSentence(sentences, /推荐|优势|适合|性价比|通勤|配套|区位|优选|绝佳/);
+    const rentQuote = unitRent ? `${unitRent}元/${unitRentUnit}` : (totalRent ? `${formatMoney(totalRent)}元/月` : "");
 
     return {
       rowIndex: 1,
@@ -717,8 +720,24 @@
       .replace(/(\d+(?:\.\d+)?)\s*m2\b/ig, "$1㎡")
       .replace(/㎡\s*m2\b/ig, "㎡")
       .replace(/㎡\s*(?:㎡|平米|平方米|平方|平)\b/g, "㎡")
+      .replace(/m3\b/ig, "m³")
+      .replace(/\r?\n+/g, "。")
       .replace(/\s+/g, " ")
       .trim();
+  }
+
+  function extractHeading(lines) {
+    const first = cleanField(lines && lines[0]);
+    if (!first || first.length > 18) return "";
+    if (/[，,。；;：:]/.test(first)) return "";
+    return first;
+  }
+
+  function normalizeRentUnit(unit, monthMarker) {
+    const text = String(unit || "").toLowerCase();
+    if (/m³|m3|立方/.test(text)) return "m³";
+    if (/㎡|m²|m2|平|方/.test(text)) return monthMarker ? "㎡/月" : "㎡";
+    return cleanField(unit);
   }
 
   function pickSentence(sentences, pattern) {
@@ -752,9 +771,41 @@
       .filter(Boolean);
     const facilities = parts.filter((part) => {
       if (/租金|报价|价格|面积|^\d+(?:\.\d+)?㎡/.test(part)) return false;
-      return /保安|岗亭|考勤|货梯|卸货|人货分流|车道|通道|宿舍|公寓|餐厅|食堂|停车|消防|排污|证件|配套/.test(part);
+      return /保安|岗亭|考勤|货梯|卸货|人货分流|车道|通道|主干道|拖车|货柜|装卸|宿舍|公寓|餐厅|食堂|停车|消防|排污|证件|配套|单层|钢结构|砖墙|层高|车间|开阔|长租|进场|改造/.test(part);
     });
-    return facilities.slice(0, 5).join("，");
+    return facilities.slice(0, 6).join("，");
+  }
+
+  function extractTrafficSummary(text) {
+    const parts = String(text || "").split(/[，,。；;、\n]/).map(cleanField).filter(Boolean);
+    const traffic = parts.filter((part) => /北滘立交|一环|高速|三乐|主干道|拖车|货柜|大货车|上高速|广州|佛山|畅通/.test(part));
+    return traffic.slice(0, 5).join("，");
+  }
+
+  function extractIndustrySummary(text) {
+    const parts = String(text || "").split(/[，,。；;、\n]/).map(cleanField).filter(Boolean);
+    const startIndex = parts.findIndex((part) => /适合/.test(part));
+    if (startIndex < 0) return "";
+    const picked = [];
+    for (let index = startIndex; index < parts.length && picked.length < 6; index += 1) {
+      let part = parts[index];
+      if (index === startIndex) part = part.replace(/^.*?(适合)/, "$1");
+      picked.push(part);
+      if (/行业|企业|优选/.test(part) && index > startIndex) break;
+    }
+    return cleanField(picked.join("，"));
+  }
+
+  function extractPropertySummary(text) {
+    const parts = String(text || "").split(/[，,。；;、\n]/).map(cleanField).filter(Boolean);
+    const property = parts.filter((part) => /单层|钢结构|砖墙|层高|车间|产线|改造|进场|长租/.test(part));
+    return property.slice(0, 5).join("，");
+  }
+
+  function extractRecommendationSummary(text) {
+    const parts = String(text || "").split(/[，,。；;、\n]/).map(cleanField).filter(Boolean);
+    const picks = parts.filter((part) => /优选|优势|绝佳|马上可以进场|产线排布无忧|长租/.test(part));
+    return picks.slice(0, 4).join("，");
   }
 
   function pickShortSentence(sentences, pattern) {
@@ -919,7 +970,10 @@
       ["租金", row.rentQuote],
       ["用电", row.powerSupply],
       ["区位", row.location],
+      ["交通", row.cityDriveTime],
+      ["条件", row.projectFeatures],
       ["配套", row.environmentDescription],
+      ["推荐", row.recommendationReason],
       ["联系人", row.contactName],
       ["联系电话", row.contactPhone]
     ].filter(([, value]) => String(value || "").trim());

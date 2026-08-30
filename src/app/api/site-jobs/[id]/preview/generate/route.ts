@@ -27,7 +27,7 @@ async function generateTemplatePreview(siteJob: SiteJobDto, style: StyleConceptD
   return {
     previewUrl: result.previewUrl,
     screenshotUrl: result.screenshotUrl,
-    generator: "template" as "template" | "codex",
+    generator: "template" as "template" | "codex" | "remote_html",
     fallbackReason: undefined as string | undefined
   };
 }
@@ -102,7 +102,7 @@ export async function POST(request: Request, context: RouteContext) {
       publishError: null,
       publishedAt: null,
       deliveryNote: null,
-      adminNote: "官网生成任务已进入本机 worker 队列。"
+      adminNote: "官网生成任务已进入后台任务队列。"
     });
 
     return NextResponse.json({ success: true, queued: true, siteJob: await withSiteImageBudget(queued) }, { headers: rateLimitHeaders(rate) });
@@ -122,7 +122,7 @@ export async function POST(request: Request, context: RouteContext) {
 
   try {
     if (generatorProvider() !== "template") {
-      throw new Error("Codex 官网生成必须通过 worker queue 执行，请设置 SITE_GENERATION_MODE=worker_queue 并启动本机 worker。");
+      throw new Error("AI 官网生成必须通过后台任务执行器运行，请设置 SITE_GENERATION_MODE=worker_queue 并启动 worker。");
     }
 
     const preview = await generateTemplatePreview(
@@ -151,7 +151,7 @@ export async function POST(request: Request, context: RouteContext) {
       screenshotUrl: preview.screenshotUrl,
       status: "client_preview",
       adminNote:
-        preview.generator === "codex"
+        preview.generator === "codex" || preview.generator === "remote_html"
           ? "官网由生成引擎生成。"
           : preview.fallbackReason
             ? `生成引擎失败，已回退模板生成：${preview.fallbackReason}`

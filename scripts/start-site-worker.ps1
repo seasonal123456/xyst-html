@@ -47,6 +47,24 @@ function Resolve-CodexCli {
   throw "codex.exe not found. Set CODEX_CLI_PATH to the full codex.exe path before starting worker."
 }
 
+function Resolve-SiteGeneratorProvider {
+  if ($env:SITE_GENERATOR_PROVIDER) {
+    return $env:SITE_GENERATOR_PROVIDER.Trim().ToLowerInvariant()
+  }
+
+  $EnvPath = Join-Path $RepoRoot ".env"
+  if (Test-Path -LiteralPath $EnvPath) {
+    $Configured = Get-Content -LiteralPath $EnvPath |
+      Where-Object { $_ -match '^SITE_GENERATOR_PROVIDER=' } |
+      Select-Object -Last 1
+    if ($Configured) {
+      return (($Configured -split '=', 2)[1]).Trim().Trim('"').Trim("'").ToLowerInvariant()
+    }
+  }
+
+  return "codex"
+}
+
 if (-not (Test-Path -LiteralPath $NodeExe)) {
   throw "node.exe not found: $NodeExe"
 }
@@ -57,18 +75,24 @@ if (-not (Test-Path -LiteralPath $WorkerScript)) {
   throw "worker script not found: $WorkerScript"
 }
 
-$CodexCli = Resolve-CodexCli
-$CodexDir = Split-Path -Parent $CodexCli
-
 Set-Location -LiteralPath $RepoRoot
-$env:CODEX_CLI_PATH = $CodexCli
-$env:Path = "$NodeDir;$CodexDir;$env:Path"
+$Provider = Resolve-SiteGeneratorProvider
+$env:Path = "$NodeDir;$env:Path"
+if ($Provider -eq "codex") {
+  $CodexCli = Resolve-CodexCli
+  $CodexDir = Split-Path -Parent $CodexCli
+  $env:CODEX_CLI_PATH = $CodexCli
+  $env:Path = "$NodeDir;$CodexDir;$env:Path"
+}
 $env:NODE_NO_WARNINGS = "1"
 
 Set-Content -LiteralPath $PidPath -Value $PID -Encoding UTF8
 Add-Content -LiteralPath $LogPath -Encoding UTF8 -Value ""
 Add-Content -LiteralPath $LogPath -Encoding UTF8 -Value "[$((Get-Date).ToUniversalTime().ToString("s"))Z] worker launcher starting pid=$PID"
-Add-Content -LiteralPath $LogPath -Encoding UTF8 -Value "[$((Get-Date).ToUniversalTime().ToString("s"))Z] CODEX_CLI_PATH=$CodexCli"
+Add-Content -LiteralPath $LogPath -Encoding UTF8 -Value "[$((Get-Date).ToUniversalTime().ToString("s"))Z] SITE_GENERATOR_PROVIDER=$Provider"
+if ($Provider -eq "codex") {
+  Add-Content -LiteralPath $LogPath -Encoding UTF8 -Value "[$((Get-Date).ToUniversalTime().ToString("s"))Z] CODEX_CLI_PATH=$CodexCli"
+}
 
 try {
   & $NodeExe $TsxCli $WorkerScript 1>> $LogPath 2>> $ErrLogPath

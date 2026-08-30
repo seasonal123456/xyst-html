@@ -1,4 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
+import { deflateSync } from "node:zlib";
 
 const baseUrl = process.env.E2E_BASE_URL || "https://xinyingst.com";
 const adminPasswordPath = process.env.E2E_ADMIN_PASSWORD_PATH || "D:/codex002/.deploy/xinyingst_admin_password.txt";
@@ -77,7 +78,46 @@ async function jsonPost(jar, path, body) {
 function testPngFile() {
   const b64 =
     "iVBORw0KGgoAAAANSUhEUgAAAoAAAAHgCAIAAAC6s0uzAAAACXBIWXMAAAsTAAALEwEAmpwYAAAGKklEQVR4nO3WMQ0AIBDAMMC/5yFjRxMFfXpnZ2cBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD4GbYAAWZxb+QAAAAASUVORK5CYII=";
-  const bytes = Uint8Array.from(Buffer.from(b64, "base64"));
+  void b64;
+  const width = 640;
+  const height = 480;
+  const raw = Buffer.alloc((width * 3 + 1) * height);
+  for (let y = 0; y < height; y += 1) {
+    const row = y * (width * 3 + 1);
+    for (let x = 0; x < width; x += 1) {
+      const offset = row + 1 + x * 3;
+      raw[offset] = 24 + Math.floor((x / width) * 80);
+      raw[offset + 1] = 96 + Math.floor((y / height) * 100);
+      raw[offset + 2] = 150 + Math.floor(((x + y) / (width + height)) * 80);
+    }
+  }
+
+  const crcTable = Array.from({ length: 256 }, (_, value) => {
+    let crc = value;
+    for (let bit = 0; bit < 8; bit += 1) crc = crc & 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+    return crc >>> 0;
+  });
+  const chunk = (type, data) => {
+    const name = Buffer.from(type, "ascii");
+    let crc = 0xffffffff;
+    for (const byte of Buffer.concat([name, data])) crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+    const output = Buffer.alloc(12 + data.length);
+    output.writeUInt32BE(data.length, 0);
+    name.copy(output, 4);
+    data.copy(output, 8);
+    output.writeUInt32BE((crc ^ 0xffffffff) >>> 0, 8 + data.length);
+    return output;
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header.set([8, 2, 0, 0, 0], 8);
+  const bytes = Buffer.concat([
+    Buffer.from("89504e470d0a1a0a", "hex"),
+    chunk("IHDR", header),
+    chunk("IDAT", deflateSync(raw)),
+    chunk("IEND", Buffer.alloc(0))
+  ]);
   return new File([bytes], "xinying-e2e-test.png", { type: "image/png" });
 }
 

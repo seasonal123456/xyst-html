@@ -31,7 +31,7 @@ async function generateTemplatePreview(siteJob: SiteJobDto, style: StyleConceptD
   return {
     previewUrl: result.previewUrl,
     screenshotUrl: result.screenshotUrl,
-    generator: "template" as "template" | "codex",
+    generator: "template" as "template" | "codex" | "remote_html",
     fallbackReason: undefined as string | undefined
   };
 }
@@ -137,7 +137,7 @@ export async function POST(request: Request, context: RouteContext) {
         siteGenerationCompletedAt: null,
         siteZipUrl: null,
         deliveryNote: null,
-        adminNote: `官网第 ${versionNumber} 次修改已进入本机 worker 队列。`
+        adminNote: `官网第 ${versionNumber} 次修改已进入后台任务队列。`
       });
 
       return NextResponse.json(
@@ -153,7 +153,7 @@ export async function POST(request: Request, context: RouteContext) {
     }
 
     if (generatorProvider() !== "template") {
-      throw new Error("Codex 官网修改必须通过 worker queue 执行，请设置 SITE_GENERATION_MODE=worker_queue 并启动本机 worker。");
+      throw new Error("AI 官网修改必须通过后台任务执行器运行，请设置 SITE_GENERATION_MODE=worker_queue 并启动 worker。");
     }
 
     await updateSiteJob(id, { status: "site_generating" });
@@ -197,7 +197,7 @@ export async function POST(request: Request, context: RouteContext) {
       deliveryNote: null,
       status: "client_preview",
       adminNote:
-        preview.generator === "codex"
+        preview.generator === "codex" || preview.generator === "remote_html"
           ? `官网第 ${versionNumber} 次修改已由生成引擎完成。`
           : `官网第 ${versionNumber} 次修改使用模板回退生成。${preview.fallbackReason || ""}`
     });

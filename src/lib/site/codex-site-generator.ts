@@ -26,11 +26,11 @@ type CodexRunOptions = {
   siteJobId?: string;
 };
 
-type GenerateCodexWebsitePreviewOptions = {
+export type GenerateSitePreviewOptions = {
   revisionInstruction?: string;
 };
 
-type ContentAsset = {
+export type ContentAsset = {
   originalName: string;
   mimeType: string;
   url: string;
@@ -294,7 +294,7 @@ async function generateFallbackContentAssets(job: SiteJobDto, style: StyleConcep
   return assets;
 }
 
-async function resolveContentAssets(job: SiteJobDto, style: StyleConceptDto): Promise<ContentAsset[]> {
+export async function resolveContentAssets(job: SiteJobDto, style: StyleConceptDto): Promise<ContentAsset[]> {
   const uploadedImages = job.assets
     .filter((asset) => asset.mimeType.startsWith("image/") && asset.assetRole !== "style_reference" && asset.assetRole !== "qr_code")
     .map((asset) => ({
@@ -778,7 +778,7 @@ async function localizeReferenceImage(sourceUrl: string, index: number, runDir: 
   return localPath;
 }
 
-function uploadedStyleReferences(job: SiteJobDto) {
+export function uploadedStyleReferences(job: SiteJobDto) {
   return job.assets.filter((asset) => asset.mimeType.startsWith("image/") && asset.assetRole === "style_reference");
 }
 
@@ -808,11 +808,11 @@ async function existingImagePaths(job: SiteJobDto, style: StyleConceptDto, conte
   return existing;
 }
 
-function buildBrief(
+export function buildBrief(
   job: SiteJobDto,
   style: StyleConceptDto,
   contentAssets: ContentAsset[],
-  options: GenerateCodexWebsitePreviewOptions = {}
+  options: GenerateSitePreviewOptions = {}
 ) {
   const finalCopyModules = getCopyModules(job);
   const finalCopyDraft = finalCopyModules.map((module) => `${module.moduleName}\n${module.content}`).join("\n\n");
@@ -938,16 +938,33 @@ function buildBrief(
   };
 }
 
-function buildPrompt(brief: unknown) {
+export function buildPrompt(brief: unknown, outputMode: "workspace" | "raw_html" = "workspace") {
   const designPresetPrompt = buildDesignPresetPrompt();
   const layoutTextBudgetPrompt = buildLayoutTextBudgetPrompt();
+  const outputInstruction =
+    outputMode === "raw_html"
+      ? `Return exactly one complete HTML document starting with <!doctype html> and ending with </html>.
+Do not use Markdown fences, explanations, summaries, filenames, or any text before/after the HTML document.`
+      : `Create a polished, production-looking website preview in the folder named site.`;
+  const fileInstruction =
+    outputMode === "raw_html"
+      ? `- Return the contents of index.html directly. Put CSS in a <style> tag and any tiny interaction in a <script> tag.`
+      : `- Create only site/index.html. Put CSS in a <style> tag and any tiny interaction in a <script> tag.
+- Do not create files outside the site folder.`;
+  const expectedOutput =
+    outputMode === "raw_html"
+      ? `Expected output: one raw, complete index.html document and nothing else.`
+      : `Expected output:
+site/
+  index.html
+
+After writing site/index.html, briefly summarize what was created.`;
   return `You are generating the final customer website for an AI website workbench.
 
-Create a polished, production-looking website preview in the folder named site.
+${outputInstruction}
 
 Hard requirements:
-- Create only site/index.html. Put CSS in a <style> tag and any tiny interaction in a <script> tag.
-- Do not create files outside the site folder.
+${fileInstruction}
 - Do not inspect the repository, install packages, run npm, call external APIs, or use external CDN assets.
 - Use UTF-8 and preserve all customer-approved Chinese copy from the brief below. You may arrange, section, and lightly title content, but do not invent qualifications, awards, data, cases, addresses, or promises the customer did not provide.
 - Design reference policy:
@@ -1028,14 +1045,10 @@ ${designPresetPrompt}
 - Keep the implementation concise enough to finish quickly.
 - Quality gate before final answer: inspect your own HTML/CSS mentally. If it lacks obvious curved/diagonal/gradient transitions, layered cutout composition, and hover dynamics, revise site/index.html before summarizing.
 
-Expected output:
-site/
-  index.html
+${expectedOutput}
 
 Brief JSON:
-${JSON.stringify(brief, null, 2)}
-
-After writing site/index.html, briefly summarize what was created.`;
+${JSON.stringify(brief, null, 2)}`;
 }
 
 function mimeTypeFromPath(filePath: string): string {
@@ -1071,7 +1084,7 @@ async function collectFiles(dir: string, root = dir): Promise<Array<{ filePath: 
   return files;
 }
 
-async function publishSiteDirectory(siteDir: string, runName: string, contentAssets: ContentAsset[]): Promise<string> {
+export async function publishSiteDirectory(siteDir: string, runName: string, contentAssets: ContentAsset[]): Promise<string> {
   const siteStat = await stat(siteDir);
   if (!siteStat.isDirectory()) {
     throw new Error("Codex site output is not a directory.");
@@ -1280,7 +1293,7 @@ async function hasGeneratedIndex(siteDir: string) {
 export async function generateCodexWebsitePreview(
   job: SiteJobDto,
   style: StyleConceptDto,
-  options: GenerateCodexWebsitePreviewOptions = {}
+  options: GenerateSitePreviewOptions = {}
 ): Promise<CodexSitePreviewResult> {
   const runName = `${safeName(job.id)}-${Date.now()}`;
   const runDir = path.join(/*turbopackIgnore: true*/ process.cwd(), "generated", "codex-runs", runName);

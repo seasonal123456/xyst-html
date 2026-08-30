@@ -130,7 +130,7 @@ async function runOne(cfg: WorkerConfig) {
 
   const { siteJob, mainStyle } = claimed;
   const activeRevision = siteJob.revisions.find((revision) => revision.status === "generating" || revision.status === "queued");
-  console.log(`[${new Date().toISOString()}] 已领取任务 ${siteJob.id}，开始本机生成。`);
+  console.log(`[${new Date().toISOString()}] 已领取任务 ${siteJob.id}，开始后台生成。`);
 
   let currentStage = "准备官网生成素材";
   await heartbeat(cfg, siteJob.id, currentStage).catch(() => undefined);
@@ -143,7 +143,8 @@ async function runOne(cfg: WorkerConfig) {
   }, heartbeatMs);
 
   try {
-    currentStage = "调用 Codex 生成官网代码";
+    const provider = process.env.SITE_GENERATOR_PROVIDER?.trim().toLowerCase() || "codex";
+    currentStage = provider === "remote_html" ? "调用远程 AI 生成官网代码" : "调用 Codex 生成官网代码";
     await heartbeat(cfg, siteJob.id, currentStage).catch(() => undefined);
     const result = await generateFinalWebsitePreview(
       siteJob,

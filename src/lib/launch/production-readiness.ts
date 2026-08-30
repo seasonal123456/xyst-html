@@ -113,6 +113,27 @@ export function getLaunchReadinessIssues(): LaunchReadinessIssue[] {
     });
   }
 
+  if (siteGeneratorProvider === "remote_html") {
+    if (siteGenerationMode !== "worker_queue") {
+      issues.push({
+        code: "remote_html_worker_queue_required",
+        severity: "blocker",
+        message: "远程 AI 官网生成未使用后台任务队列。",
+        fix: "设置 SITE_GENERATION_MODE=worker_queue，并由服务器后台 worker 执行流式生成。"
+      });
+    }
+    for (const name of ["REMOTE_SITE_API_BASE_URL", "REMOTE_SITE_API_KEY", "REMOTE_SITE_MODEL"]) {
+      if (!env(name)) {
+        issues.push({
+          code: `missing_${name.toLowerCase()}`,
+          severity: "blocker",
+          message: `缺少 ${name}。`,
+          fix: "在服务器环境变量中补齐远程官网生成配置；密钥只保存在服务端。"
+        });
+      }
+    }
+  }
+
   if (!env("PUBLIC_SITE_BASE_URL")) {
     issues.push({
       code: "public_site_base_url_missing",

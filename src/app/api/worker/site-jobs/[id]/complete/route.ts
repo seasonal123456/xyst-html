@@ -74,11 +74,13 @@ export async function POST(request: Request, context: RouteContext) {
     workerLeaseUntil: null,
     siteGenerationCompletedAt: new Date(),
     adminNote:
-      body.generator === "codex"
-        ? `本机 worker${body.workerId ? ` ${body.workerId}` : ""} 已完成官网生成。${qualityNote}`
+      body.generator === "remote_html"
+        ? `服务器后台 worker${body.workerId ? ` ${body.workerId}` : ""} 已通过远程 AI 接口完成官网生成。${qualityNote}`
+        : body.generator === "codex"
+        ? `后台 worker${body.workerId ? ` ${body.workerId}` : ""} 已通过 Codex 完成官网生成。${qualityNote}`
         : body.fallbackReason
-          ? `本机 worker 使用模板回退完成官网生成：${body.fallbackReason}${qualityNote}`
-          : `本机 worker 已完成官网生成。${qualityNote}`
+          ? `后台 worker 使用模板回退完成官网生成：${body.fallbackReason}${qualityNote}`
+          : `后台 worker 已完成官网生成。${qualityNote}`
   });
 
   if (!updated) return NextResponse.json({ success: false, error: "官网任务不存在。" }, { status: 404 });

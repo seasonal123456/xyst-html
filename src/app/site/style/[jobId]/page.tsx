@@ -157,6 +157,7 @@ export default function SiteStylePage() {
   const [preferUploadedStyleReference, setPreferUploadedStyleReference] = useState(false);
   const [savingStyleReferences, setSavingStyleReferences] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
 
   async function load() {
     const data = await fetch(`/api/site-jobs/${jobId}`, { cache: "no-store" }).then((res) => res.json());
@@ -202,10 +203,12 @@ export default function SiteStylePage() {
     setLoading(true);
     setElapsed(0);
     setError("");
+    setNotice("");
     try {
       const data = await fetch(`/api/site-jobs/${jobId}/style-concepts/generate`, { method: "POST", credentials: "same-origin" }).then((res) => res.json());
       if (data.success) {
         setSiteJob((current) => preserveImageUsage(data.siteJob, current));
+        setNotice(data.warning || "");
       } else {
         if (data.siteJob) {
           setSiteJob((current) => preserveImageUsage(data.siteJob, current));
@@ -225,6 +228,7 @@ export default function SiteStylePage() {
   async function saveStyleReferenceSettings() {
     setSavingStyleReferences(true);
     setError("");
+    setNotice("");
     const formData = new FormData();
     const useUploadedReference = styleReferenceMode === "has" && preferUploadedStyleReference;
     formData.append("preferUploadedStyleReference", String(useUploadedReference));
@@ -258,6 +262,7 @@ export default function SiteStylePage() {
 
   async function selectStyleForCopy(styleId: string) {
     setError("");
+    setNotice("");
     const data = await fetch(`/api/site-jobs/${jobId}/style-concepts/${styleId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -281,6 +286,7 @@ export default function SiteStylePage() {
     setGeneratingSiteId(styleId);
     setWebsiteElapsed(0);
     setError("");
+    setNotice("");
     const data = await fetch(`/api/site-jobs/${jobId}/preview/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -521,7 +527,8 @@ export default function SiteStylePage() {
             <p className="mt-3 text-xs font-bold leading-5 text-slate-500">点击参考图上的“收藏”，这里会汇总客户喜欢的方向，后续生成官网时也会参考。</p>
           )}
         </section>
-        {error ? <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm font-bold text-red-600">{error}</p> : null}
+        {notice ? <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-sm font-bold leading-6 text-amber-700">{notice}</p> : null}
+        {error ? <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm font-bold leading-6 text-red-600">{error}</p> : null}
       </aside>
 
       <section className="grid gap-4">

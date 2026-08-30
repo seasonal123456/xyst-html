@@ -35,6 +35,7 @@ export function MemberCenter({ account }: { account: Account }) {
   const [contact, setContact] = useState("");
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(false);
+  const [projectCardLoading, setProjectCardLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const selectedRechargePackage = packages.find((item) => item.packageName === selectedPackage) || packages[0];
@@ -63,6 +64,23 @@ export function MemberCenter({ account }: { account: Account }) {
     setMessage("充值申请已提交，管理员处理后次数会自动增加。");
     setNote("");
     await loadRequests();
+  }
+
+  async function openProjectCardTool() {
+    setProjectCardLoading(true);
+    setMessage("");
+    setError("");
+    const response = await fetch("/api/project-card/sso-ticket", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" }
+    });
+    const data = (await response.json().catch(() => ({}))) as { success?: boolean; url?: string; error?: string };
+    setProjectCardLoading(false);
+    if (!response.ok || !data.success || !data.url) {
+      setError(data.error || "项目推荐卡工具暂时无法打开，请稍后再试。");
+      return;
+    }
+    window.location.href = data.url;
   }
 
   useEffect(() => {
@@ -102,6 +120,14 @@ export function MemberCenter({ account }: { account: Account }) {
             <a href="/site/start" className="rounded-md bg-blue-600 px-5 py-3 text-sm font-black text-white transition hover:bg-blue-700">
               开始生成官网
             </a>
+            <button
+              type="button"
+              onClick={openProjectCardTool}
+              disabled={projectCardLoading}
+              className="rounded-md bg-slate-950 px-5 py-3 text-sm font-black text-white transition hover:bg-slate-800 disabled:bg-slate-400"
+            >
+              {projectCardLoading ? "正在进入..." : "项目推荐卡生成器"}
+            </button>
             <a href="/login" className="rounded-md border border-blue-200 bg-white px-5 py-3 text-sm font-black text-blue-700">
               切换账号
             </a>

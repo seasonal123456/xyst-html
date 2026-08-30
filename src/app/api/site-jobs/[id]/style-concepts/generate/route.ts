@@ -14,6 +14,19 @@ export const dynamic = "force-dynamic";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
+function publicStyleGenerationError(message: string) {
+  if (/safety|rejected by the safety system|safety_violations|content policy/i.test(message)) {
+    return "本次风格图被上游图像安全系统拦截，未生成有效结果，已自动返还本次权益。请稍后重试，系统会使用更中性的商业官网描述重新生成。";
+  }
+  if (/timeout|fetch failed|network|ECONNRESET|ETIMEDOUT/i.test(message)) {
+    return "上游生图服务暂时连接不稳定，未生成有效结果，已自动返还本次权益。请稍后重试。";
+  }
+  if (/生图额度|图片额度|remaining|limit/i.test(message)) {
+    return message;
+  }
+  return "风格参考图生成失败，未生成有效结果，已自动返还本次权益。请稍后重试。";
+}
+
 export async function POST(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const account = await getCurrentCustomer();
@@ -66,6 +79,7 @@ export async function POST(request: Request, context: RouteContext) {
     concepts = await generateStyleConcepts({ siteJob, uploadedAssets: siteJob.assets, batchNumber });
   } catch (error) {
     const message = error instanceof Error ? error.message : "生成整站设计参考图失败。";
+    const publicMessage = publicStyleGenerationError(message);
     if (credit.charged) {
       await refundCustomerCredits(account.id, 1).catch(() => undefined);
       await prisma.siteJob.update({
@@ -86,7 +100,7 @@ export async function POST(request: Request, context: RouteContext) {
         siteJob: reverted ? await withSiteImageBudget(reverted) : null,
         credits: credit.charged ? credit.remainingCredits + 1 : credit.remainingCredits,
         charged: false,
-        error: `风格参考图生成失败，请稍后重试。原因：${message}`
+        error: publicMessage
       },
       { status: 502, headers: rateLimitHeaders(rate) }
     );
@@ -109,9 +123,11 @@ export async function POST(request: Request, context: RouteContext) {
     }))
   });
 
-  const updated = await updateSiteJob(id, { status: "style_generated", selectedMainStyleId: null });
+  const partialWarning =
+    concepts.length < 3 ? `本批并行风格参考图生成 ${concepts.length}/3 张成功；未成功的方案可稍后点击“新增 3 张风格参考图”继续补充。` : "";
+  const updated = await updateSiteJob(id, { status: "style_generated", selectedMainStyleId: null, adminNote: partialWarning || null });
   return NextResponse.json(
-    { success: true, siteJob: await withSiteImageBudget(updated), credits: credit.remainingCredits, charged: credit.charged },
+    { success: true, siteJob: await withSiteImageBudget(updated), credits: credit.remainingCredits, charged: credit.charged, warning: partialWarning || undefined },
     { headers: rateLimitHeaders(rate) }
   );
 }

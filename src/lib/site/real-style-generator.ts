@@ -36,6 +36,21 @@ type StyleImageConfig = {
   quality: string;
 };
 
+type StyleConceptGenerationFailure = {
+  index: number;
+  styleName: string;
+  error: unknown;
+};
+
+const imagePromptSafetyReplacements: Array<[RegExp, string]> = [
+  [/性感|情色|色情|成人内容|成人用品|情趣|裸露|裸照|私密照|私房照|擦边/gi, "专业"],
+  [/胸部|丰胸|隆胸|乳房|私处|生殖|下体/gi, "形象"],
+  [/小姐姐|美女|辣妹|网红美女/gi, "人物"],
+  [/约炮|陪聊|陪玩|陪酒|夜店|会所/gi, "商务服务"],
+  [/写真|私房摄影|人体摄影/gi, "人像摄影"],
+  [/医美|整形|隆鼻|瘦脸|脱毛/gi, "健康美容服务"]
+];
+
 function getStyleImageConfig(): StyleImageConfig | null {
   const apiKey = process.env.STYLE_IMAGE_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) return null;
@@ -86,17 +101,24 @@ function visualBlueprintPrompt() {
   ].join("\n");
 }
 
+function sanitizeImagePromptText(value: string, fallback = "企业官网") {
+  const normalized = value.replace(/[\u0000-\u001f]+/g, " ").replace(/\s+/g, " ").trim();
+  const safe = imagePromptSafetyReplacements.reduce((current, [pattern, replacement]) => current.replace(pattern, replacement), normalized);
+  return safe.slice(0, 900) || fallback;
+}
+
 function directionsFor(input: StyleConceptInput): StyleDirection[] {
-  const business = input.siteJob.businessDescription;
+  const business = sanitizeImagePromptText(input.siteJob.businessDescription, "企业官网业务");
+  const websitePurpose = sanitizeImagePromptText(input.siteJob.websitePurpose, "企业官网");
   const styleReferences = input.uploadedAssets.filter((asset) => asset.assetRole === "style_reference");
   const assetHints =
     input.uploadedAssets
       .filter((asset) => asset.assetRole !== "style_reference" && asset.assetRole !== "qr_code")
       .slice(0, 8)
-      .map((asset) => asset.originalName)
+      .map((asset) => sanitizeImagePromptText(asset.originalName, "业务图片"))
       .join("、") || "暂无业务图片素材，可使用高级占位视觉";
   const referenceHint = styleReferences.length
-    ? `客户上传了 ${styleReferences.length} 张参考官网风格截图：${styleReferences.map((asset) => asset.originalName).join("、")}。需要参考这些截图的配色、字体气质、版式节奏、按钮风格、留白、图文关系和整体审美，但不要照抄具体品牌、logo、商标、人物或原网站文案。`
+    ? `客户上传了 ${styleReferences.length} 张参考官网风格截图：${styleReferences.map((asset) => sanitizeImagePromptText(asset.originalName, "参考截图")).join("、")}。需要参考这些截图的配色、字体气质、版式节奏、按钮风格、留白、图文关系和整体审美，但不要照抄具体品牌、logo、商标、人物或原网站文案。`
     : "客户未上传参考官网风格图，请根据业务生成差异明显的视觉方向。";
 
   return createRandomStyleDesignConditions(3).map((conditions, index) => ({
@@ -121,6 +143,7 @@ function directionsFor(input: StyleConceptInput): StyleDirection[] {
       "视觉手法必须在首屏和下方板块中至少多处出现，让三张方案之间有明显差异。",
       visualBlueprintPrompt(),
       `业务：${business}`,
+      `网站用途：${websitePurpose}`,
       `素材线索：${assetHints}`,
       `参考要求：${referenceHint}`
     ].join("\n")
@@ -129,6 +152,7 @@ function directionsFor(input: StyleConceptInput): StyleDirection[] {
 
 function buildImagePrompt(direction: StyleDirection, input: StyleConceptInput) {
   const designPresetPrompt = buildDesignPresetPrompt();
+  const websitePurpose = sanitizeImagePromptText(input.siteJob.websitePurpose, "企业官网");
   return [
     "生成一张中文官网“整站设计参考图”，不是只画英雄首屏，不是单张 Banner，不是插画海报。",
     "画面比例 3:2，像专业网页设计方案展示图，可以被前端工程师按 HTML/CSS 实现。",
@@ -140,13 +164,24 @@ function buildImagePrompt(direction: StyleDirection, input: StyleConceptInput) {
     "这张图会成为最终官网的第一设计依据。请把它画成可被高度模仿的整站蓝图：结构、线条、图片槽位、板块顺序、首屏沉浸感和 CTA 位置都要明确。",
     "如果业务适合，请优先尝试全宽沉浸式横屏 hero：背景/主体图横跨整屏，左侧标题和按钮叠在图上，右侧有少量轻量数据浮层，底部有横向信息条；整体像正式官网首屏。",
     "不要让行业模板决定最终结构。行业只负责避免内容跑偏；真正决定页面美感和结构的是本张风格预览图。",
+    "画面只呈现正规的企业官网、产品、空间、项目、服务流程和商务人物形象；人物必须着装得体，避免身体特写、暧昧姿态和低俗营销表达。",
     "优先参考以下产品级 UI 审美库，但必须结合客户行业个性化，不要所有行业都套同一种 SaaS 页面：",
     designPresetPrompt,
-    `网站用途：${input.siteJob.websitePurpose}`,
+    `网站用途：${websitePurpose}`,
     `风格方向：${direction.visualPrompt}`,
     "如果有参考官网风格图，最终画面要呈现“参考图同类审美 + 客户自身业务内容 + 完整板块设计参考”的效果。",
     "避免：只画首屏、只画一张横幅、纯机器人/AI 海报、过度抽象 3D 场景、杂乱后台表格、不可实现的超现实界面、所有板块都是同样的矩形卡片。"
   ].join("\n");
+}
+
+function summarizeStyleConceptFailures(failures: StyleConceptGenerationFailure[]) {
+  const detail = failures
+    .map((failure) => {
+      const message = failure.error instanceof Error ? failure.error.message : String(failure.error || "未知错误");
+      return `${failure.styleName || `方案 ${failure.index + 1}`}：${message}`;
+    })
+    .join("；");
+  return `真实整站设计参考图生成失败：${detail}`;
 }
 
 async function saveStyleImage(jobId: string, batchNumber: number, index: number, image: ImageApiResponse): Promise<string> {
@@ -258,34 +293,50 @@ export async function generateRealStyleConcepts(input: StyleConceptInput): Promi
   if (!config) throw new Error("真实整站设计参考图接口未配置 API key。");
 
   const directions = directionsFor(input);
+  const budget = await getSiteImageBudget(input.siteJob.id);
+  if (budget.remaining < directions.length) {
+    throw new Error(buildSiteImageBudgetError(budget, directions.length));
+  }
+
+  const settled = await Promise.allSettled(
+    directions.map(async (direction, index) => {
+      const result = await requestImage(config, buildImagePrompt(direction, input), {
+        siteJobId: input.siteJob.id,
+        batchNumber: input.batchNumber,
+        index,
+        styleName: direction.styleName
+      });
+      return {
+        styleName: direction.styleName,
+        styleDescription: direction.styleDescription,
+        suitableFor: direction.suitableFor,
+        schemeType: direction.schemeType,
+        layoutStyle: direction.layoutStyle,
+        colorTendency: direction.colorTendency,
+        visualTechniques: direction.visualTechniques,
+        emotionalDescription: direction.emotionalDescription,
+        imageUrl: await saveStyleImage(input.siteJob.id, input.batchNumber, index, result),
+        generationBatch: input.batchNumber,
+        mode: "real" as const
+      };
+    })
+  );
+
+  const failures: StyleConceptGenerationFailure[] = [];
   const concepts: GeneratedStyleConcept[] = [];
 
-  for (let index = 0; index < directions.length; index += 1) {
+  for (let index = 0; index < settled.length; index += 1) {
+    const result = settled[index];
     const direction = directions[index];
-    const budget = await getSiteImageBudget(input.siteJob.id);
-    if (budget.remaining < 1) {
-      throw new Error(buildSiteImageBudgetError(budget, 1));
+    if (result.status === "fulfilled") {
+      concepts.push(result.value);
+    } else {
+      failures.push({ index, styleName: direction.styleName, error: result.reason });
     }
+  }
 
-    const result = await requestImage(config, buildImagePrompt(direction, input), {
-      siteJobId: input.siteJob.id,
-      batchNumber: input.batchNumber,
-      index,
-      styleName: direction.styleName
-    });
-    concepts.push({
-      styleName: direction.styleName,
-      styleDescription: direction.styleDescription,
-      suitableFor: direction.suitableFor,
-      schemeType: direction.schemeType,
-      layoutStyle: direction.layoutStyle,
-      colorTendency: direction.colorTendency,
-      visualTechniques: direction.visualTechniques,
-      emotionalDescription: direction.emotionalDescription,
-      imageUrl: await saveStyleImage(input.siteJob.id, input.batchNumber, index, result),
-      generationBatch: input.batchNumber,
-      mode: "real"
-    });
+  if (failures.length && !concepts.length) {
+    throw new Error(summarizeStyleConceptFailures(failures));
   }
 
   return concepts;

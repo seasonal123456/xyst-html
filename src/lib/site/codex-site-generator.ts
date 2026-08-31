@@ -944,7 +944,8 @@ export function buildPrompt(brief: unknown, outputMode: "workspace" | "raw_html"
   const outputInstruction =
     outputMode === "raw_html"
       ? `Return exactly one complete HTML document starting with <!doctype html> and ending with </html>.
-Do not use Markdown fences, explanations, summaries, filenames, or any text before/after the HTML document.`
+Do not use Markdown fences, explanations, summaries, filenames, or any text before/after the HTML document.
+Keep the HTML and CSS concise enough to finish within the output limit. Prioritize complete structure, approved copy, required images, responsive layout, and closing </body></html> over decorative code volume.`
       : `Create a polished, production-looking website preview in the folder named site.`;
   const fileInstruction =
     outputMode === "raw_html"

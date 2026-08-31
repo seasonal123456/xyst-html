@@ -45,11 +45,13 @@ type StreamState = {
   model?: string;
   usage?: ParsedModelUsage;
   eventCount: number;
+  finishReason?: string;
 };
 
 type ChatStreamChoice = {
   delta?: { content?: string | Array<{ type?: string; text?: string }> };
   message?: { content?: string };
+  finish_reason?: string | null;
 };
 
 type ChatStreamEvent = {
@@ -138,8 +140,10 @@ export class ChatCompletionSseParser {
       const event = JSON.parse(data) as ChatStreamEvent;
       this.state.eventCount += 1;
       if (!this.state.model && event.model) this.state.model = event.model;
-      const piece = contentText(event.choices?.[0]);
+      const choice = event.choices?.[0];
+      const piece = contentText(choice);
       if (piece) this.state.content += piece;
+      if (choice?.finish_reason) this.state.finishReason = choice.finish_reason;
       if (event.usage) this.state.usage = extractUsageFromResponse({ usage: event.usage });
     } catch {
       // Ignore non-JSON provider keepalive events; the final HTML validator remains authoritative.
@@ -187,6 +191,26 @@ export function validateRemoteHtml(html: string) {
     if (pattern.test(html)) errors.push(message);
   }
   return errors;
+}
+
+export function shouldRetryIncompleteRemoteHtml(errors: string[]) {
+  const incompleteMessages = ["HTML 内容过短", "缺少 <!doctype html>", "HTML 根节点不完整", "head 节点不完整", "body 节点不完整"];
+  return errors.length > 0 && errors.every((error) => incompleteMessages.some((message) => error.includes(message)));
+}
+
+function combinedUsage(usages: Array<ParsedModelUsage | undefined>): ParsedModelUsage {
+  const sum = (key: keyof ParsedModelUsage) => {
+    const values = usages.map((usage) => usage?.[key]).filter((value): value is number => typeof value === "number");
+    return values.length ? values.reduce((total, value) => total + value, 0) : undefined;
+  };
+  return {
+    inputTokens: sum("inputTokens"),
+    outputTokens: sum("outputTokens"),
+    totalTokens: sum("totalTokens"),
+    cachedInputTokens: sum("cachedInputTokens"),
+    reasoningTokens: sum("reasoningTokens"),
+    rawUsageJson: JSON.stringify(usages.map((usage) => usage?.rawUsageJson || null))
+  };
 }
 
 function publicImageUrl(sourceUrl: string) {
@@ -282,32 +306,27 @@ async function remoteImageInputs(
   return inputs;
 }
 
-async function callRemoteHtmlApi(config: RemoteHtmlConfig, prompt: string, images: RemoteImageInput[], siteJobId: string) {
+async function callRemoteHtmlApi(config: RemoteHtmlConfig, prompt: string, images: RemoteImageInput[], siteJobId: string, diagnosticsDir: string) {
   const messageContent: Array<Record<string, unknown>> = [{ type: "text", text: prompt }];
   for (const image of images) {
     messageContent.push({ type: "text", text: image.label });
     messageContent.push({ type: "image_url", image_url: { url: image.providerUrl } });
   }
 
-  const body: Record<string, unknown> = {
-    model: config.model,
-    stream: true,
-    max_tokens: config.maxOutputTokens,
-    messages: [
-      {
-        role: "system",
-        content:
-          "You are a senior frontend engineer. Follow the complete user specification. Return only one production-ready, self-contained HTML document."
-      },
-      { role: "user", content: messageContent }
-    ]
-  };
-  if (config.reasoningEffort) body.reasoning_effort = config.reasoningEffort;
-
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.timeoutMs);
   const startedAt = Date.now();
-  try {
+  const attempts: StreamState[] = [];
+  const request = async (messages: Array<Record<string, unknown>>) => {
+    const body: Record<string, unknown> = {
+      model: config.model,
+      stream: true,
+      stream_options: { include_usage: true },
+      max_tokens: config.maxOutputTokens,
+      messages
+    };
+    if (config.reasoningEffort) body.reasoning_effort = config.reasoningEffort;
+
     const response = await fetch(config.url, {
       method: "POST",
       headers: {
@@ -334,9 +353,42 @@ async function callRemoteHtmlApi(config: RemoteHtmlConfig, prompt: string, image
     }
     parser.push(decoder.decode());
     const result = parser.finish();
-    const html = extractRemoteHtml(result.content);
-    const errors = validateRemoteHtml(html);
+    attempts.push(result);
+    await writeFile(path.join(diagnosticsDir, `remote-response-attempt-${attempts.length}.txt`), result.content, "utf8");
+    return result;
+  };
+
+  try {
+    let result = await request([
+      {
+        role: "system",
+        content:
+          "You are a senior frontend engineer. Follow the complete user specification. Return only one concise, production-ready, self-contained HTML document. Always finish with closing body and html tags."
+      },
+      { role: "user", content: messageContent }
+    ]);
+    let html = extractRemoteHtml(result.content);
+    let errors = validateRemoteHtml(html);
+
+    if (shouldRetryIncompleteRemoteHtml(errors)) {
+      result = await request([
+        {
+          role: "system",
+          content:
+            "Repair a truncated website response. Return only one complete, concise, self-contained HTML document. Preserve approved content and useful design, remove no required customer images, use inline CSS, and always close head, body, and html. Do not use Markdown fences, forms, frames, external scripts/styles, or network calls."
+        },
+        {
+          role: "user",
+          content: `Original website specification:\n${prompt}\n\nTruncated response to repair:\n${result.content}`
+        }
+      ]);
+      html = extractRemoteHtml(result.content);
+      errors = validateRemoteHtml(html);
+    }
+
     if (errors.length) throw new Error(`远程模型返回的 HTML 未通过安全与完整性校验：${errors.join("；")}`);
+
+    const usage = combinedUsage(attempts.map((attempt) => attempt.usage));
 
     await recordModelUsage({
       provider: "remote-openai-compatible",
@@ -345,13 +397,29 @@ async function callRemoteHtmlApi(config: RemoteHtmlConfig, prompt: string, image
       endpoint: config.url,
       siteJobId,
       status: "success",
+      requestCount: attempts.length,
       promptCharacters: prompt.length,
       responseCharacters: html.length,
       durationMs: elapsedMs(startedAt),
-      metadata: { stream: true, eventCount: result.eventCount, imageInputCount: images.length, timeoutMs: config.timeoutMs },
-      ...result.usage
+      metadata: {
+        stream: true,
+        attempts: attempts.length,
+        eventCounts: attempts.map((attempt) => attempt.eventCount),
+        finishReasons: attempts.map((attempt) => attempt.finishReason || null),
+        responseCharacters: attempts.map((attempt) => attempt.content.length),
+        imageInputCount: images.length,
+        timeoutMs: config.timeoutMs
+      },
+      ...usage
     });
-    return { html, model: result.model || config.model, eventCount: result.eventCount, durationMs: elapsedMs(startedAt) };
+    return {
+      html,
+      model: result.model || config.model,
+      eventCount: attempts.reduce((total, attempt) => total + attempt.eventCount, 0),
+      attempts: attempts.length,
+      finishReasons: attempts.map((attempt) => attempt.finishReason || null),
+      durationMs: elapsedMs(startedAt)
+    };
   } catch (error) {
     const normalized = error instanceof Error && error.name === "AbortError" ? new Error(`远程官网生成超过 ${Math.round(config.timeoutMs / 1000)} 秒，已停止。`) : error;
     await recordModelUsage({
@@ -361,9 +429,19 @@ async function callRemoteHtmlApi(config: RemoteHtmlConfig, prompt: string, image
       endpoint: config.url,
       siteJobId,
       status: "error",
+      requestCount: Math.max(1, attempts.length),
       promptCharacters: prompt.length,
       durationMs: elapsedMs(startedAt),
-      metadata: { stream: true, imageInputCount: images.length, timeoutMs: config.timeoutMs },
+      metadata: {
+        stream: true,
+        attempts: attempts.length,
+        eventCounts: attempts.map((attempt) => attempt.eventCount),
+        finishReasons: attempts.map((attempt) => attempt.finishReason || null),
+        responseCharacters: attempts.map((attempt) => attempt.content.length),
+        imageInputCount: images.length,
+        timeoutMs: config.timeoutMs
+      },
+      ...combinedUsage(attempts.map((attempt) => attempt.usage)),
       error: normalized
     });
     throw normalized;
@@ -402,11 +480,22 @@ export async function generateRemoteHtmlWebsitePreview(
   );
   await appendFile(path.join(runDir, "remote-progress.log"), `[${new Date().toISOString()}] calling ${config.model}; images=${images.length}; timeoutMs=${config.timeoutMs}\n`, "utf8");
 
-  const generated = await callRemoteHtmlApi(config, prompt, images, job.id);
+  const generated = await callRemoteHtmlApi(config, prompt, images, job.id, runDir);
   await writeFile(path.join(siteDir, "index.html"), generated.html, "utf8");
   await writeFile(
     path.join(runDir, "remote-result.json"),
-    JSON.stringify({ model: generated.model, eventCount: generated.eventCount, durationMs: generated.durationMs, htmlCharacters: generated.html.length }, null, 2),
+    JSON.stringify(
+      {
+        model: generated.model,
+        attempts: generated.attempts,
+        finishReasons: generated.finishReasons,
+        eventCount: generated.eventCount,
+        durationMs: generated.durationMs,
+        htmlCharacters: generated.html.length
+      },
+      null,
+      2
+    ),
     "utf8"
   );
   await appendFile(path.join(runDir, "remote-progress.log"), `[${new Date().toISOString()}] index.html generated; publishing\n`, "utf8");
@@ -418,6 +507,6 @@ export async function generateRemoteHtmlWebsitePreview(
     screenshotUrl: job.preferUploadedStyleReference ? uploadedStyleReferences(job)[0]?.url || style.imageUrl : style.imageUrl,
     generator: "remote_html",
     runDir,
-    message: `${generated.model} 流式生成完成，共 ${generated.eventCount} 个事件。`
+    message: `${generated.model} 流式生成完成，共 ${generated.eventCount} 个事件、${generated.attempts} 次请求。`
   };
 }

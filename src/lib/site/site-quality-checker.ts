@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "child_process";
 import path from "path";
-import { access, mkdir, writeFile } from "fs/promises";
-import { pathToFileURL } from "url";
+import { access, mkdir, readFile, writeFile } from "fs/promises";
+import { fileURLToPath, pathToFileURL } from "url";
 
 export type SiteQualityIssue = {
   severity: "error" | "warning";
@@ -38,6 +38,16 @@ export function siteQualityCdpTimeoutMs(raw = process.env.SITE_QUALITY_CDP_TIMEO
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
   return Math.min(300_000, Math.max(30_000, Math.floor(parsed)));
+}
+
+export function siteQualityBrowserMode(raw = process.env.SITE_QUALITY_BROWSER_MODE): "cdp" | "cli" {
+  return raw?.trim().toLowerCase() === "cli" ? "cli" : "cdp";
+}
+
+export function siteQualityCliTimeoutMs(raw = process.env.SITE_QUALITY_CLI_TIMEOUT_MS) {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 180_000;
+  return Math.min(600_000, Math.max(60_000, Math.floor(parsed)));
 }
 
 const chromeCandidates = [
@@ -446,6 +456,123 @@ function qaExpression(viewport: string) {
 `;
 }
 
+function injectCliQualityProbe(html: string, baseHref: string, viewport: string) {
+  const probe = `<script>
+(async () => {
+  if (document.readyState !== "complete") {
+    await new Promise((resolve) => window.addEventListener("load", resolve, { once: true }));
+  }
+  if (document.fonts && document.fonts.ready) await document.fonts.ready;
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  const issues = ${qaExpression(viewport)};
+  document.documentElement.setAttribute("data-codex-site-quality", encodeURIComponent(JSON.stringify(issues)));
+})().catch((error) => {
+  document.documentElement.setAttribute(
+    "data-codex-site-quality-error",
+    encodeURIComponent(error instanceof Error ? error.message : String(error))
+  );
+});
+</script>`;
+  const withBase = injectBaseHref(html, baseHref);
+  if (/<\/body\s*>/i.test(withBase)) return withBase.replace(/<\/body\s*>/i, `${probe}\n</body>`);
+  return `${withBase}\n${probe}`;
+}
+
+async function runChromeCli(chromePath: string, args: string[], timeoutMs: number) {
+  const chrome = spawn(chromePath, args, {
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform !== "win32"
+  });
+  let stdout = "";
+  let stderr = "";
+  chrome.stdout?.on("data", (chunk) => {
+    if (stdout.length < 12_000_000) stdout += chunk.toString("utf8");
+  });
+  chrome.stderr?.on("data", (chunk) => {
+    if (stderr.length < 1_000_000) stderr += chunk.toString("utf8");
+  });
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const result = await Promise.race([
+      new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+        chrome.once("error", reject);
+        chrome.once("exit", (code, signal) => resolve({ code, signal }));
+      }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Chrome CLI timed out after ${timeoutMs}ms.`)), timeoutMs);
+      })
+    ]);
+    if (result.code !== 0) {
+      throw new Error(`Chrome CLI exited with code ${result.code ?? "null"}${result.signal ? ` (${result.signal})` : ""}: ${stderr.slice(-1000)}`);
+    }
+    return stdout;
+  } finally {
+    if (timer) clearTimeout(timer);
+    await terminateChrome(chrome);
+  }
+}
+
+async function inspectViewportWithCli(
+  chromePath: string,
+  url: string,
+  outputDir: string,
+  viewport: { name: string; width: number; height: number; mobile: boolean; scale: number }
+) {
+  if (!url.startsWith("file:")) throw new Error(`Chrome CLI quality mode requires a local HTML snapshot: ${url}`);
+  const sourcePath = fileURLToPath(url);
+  const sourceHtml = await readFile(sourcePath, "utf8");
+  const inspectionPath = path.join(outputDir, `inspection-${viewport.name}.html`);
+  const screenshotPath = path.join(outputDir, `${viewport.name}.png`);
+  const profileDir = path.join(outputDir, `chrome-profile-${viewport.name}`);
+  await mkdir(profileDir, { recursive: true });
+  await writeFile(inspectionPath, injectCliQualityProbe(sourceHtml, url, viewport.name), "utf8");
+
+  const args = [
+    "--headless",
+    "--disable-gpu",
+    "--disable-background-networking",
+    "--disable-component-update",
+    "--disable-default-apps",
+    "--disable-extensions",
+    "--disable-sync",
+    "--metrics-recording-only",
+    "--mute-audio",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-features=TFLiteLanguageDetectionEnabled,OptimizationHints,OptimizationGuideModelDownloading,OnDeviceModel,MediaRouter,Translate",
+    `--user-data-dir=${profileDir}`,
+    `--window-size=${viewport.width},${viewport.height}`,
+    `--force-device-scale-factor=${viewport.scale}`,
+    "--virtual-time-budget=8000",
+    "--run-all-compositor-stages-before-draw",
+    `--screenshot=${screenshotPath}`,
+    "--dump-dom",
+    pathToFileURL(inspectionPath).toString()
+  ];
+  if (process.platform !== "win32") {
+    args.splice(1, 0, "--no-sandbox", "--disable-dev-shm-usage", "--disable-software-rasterizer");
+  }
+
+  const dumpedHtml = await runChromeCli(chromePath, args, siteQualityCliTimeoutMs());
+  const encodedIssues = dumpedHtml.match(/\bdata-codex-site-quality="([^"]*)"/i)?.[1];
+  const encodedError = dumpedHtml.match(/\bdata-codex-site-quality-error="([^"]*)"/i)?.[1];
+  if (encodedError) throw new Error(`Chrome CLI probe failed: ${decodeURIComponent(encodedError)}`);
+  if (!encodedIssues) throw new Error("Chrome CLI probe did not return quality issues.");
+  const issues = JSON.parse(decodeURIComponent(encodedIssues)) as SiteQualityIssue[];
+  if (!(await fileExists(screenshotPath))) {
+    issues.push({
+      severity: "warning",
+      code: "screenshot_failed",
+      message: "自检截图保存失败，已保留 DOM 检查结果。",
+      viewport: viewport.name
+    });
+    return { issues, screenshotPath: undefined };
+  }
+  return { issues, screenshotPath };
+}
+
 async function inspectViewport(
   cdp: CdpSession,
   url: string,
@@ -553,7 +680,22 @@ export async function runSiteQualityCheck(input: { url: string; jobId: string; f
   let cdp: CdpSession | null = null;
 
   try {
-    const launchArgs = [
+    const inspection = await prepareInspectableUrl(input.url, outputDir);
+    const viewports = [
+      { name: "desktop", width: 1440, height: 1000, mobile: false, scale: 1 },
+      { name: "mobile", width: 390, height: 844, mobile: true, scale: 2 }
+    ];
+    const issues: SiteQualityIssue[] = [...inspection.issues];
+    const screenshots: string[] = [];
+
+    if (siteQualityBrowserMode() === "cli") {
+      for (const viewport of viewports) {
+        const result = await inspectViewportWithCli(chromePath, inspection.url, outputDir, viewport);
+        issues.push(...result.issues);
+        if (result.screenshotPath) screenshots.push(result.screenshotPath);
+      }
+    } else {
+      const launchArgs = [
         "--headless",
         `--remote-debugging-port=${port}`,
         "--remote-allow-origins=*",
@@ -566,29 +708,22 @@ export async function runSiteQualityCheck(input: { url: string; jobId: string; f
         "--no-default-browser-check",
         "about:blank"
       ];
-    if (process.platform !== "win32") {
-      launchArgs.splice(1, 0, "--no-sandbox", "--disable-dev-shm-usage", "--disable-software-rasterizer");
-    }
-    chrome = spawn(
-      chromePath,
-      launchArgs,
-      { windowsHide: true, stdio: "ignore", detached: process.platform !== "win32" }
-    );
-    await waitForDevTools(port);
-    const tab = await openTab(port);
-    cdp = await connectCdp(tab.webSocketDebuggerUrl);
-    const inspection = await prepareInspectableUrl(input.url, outputDir);
-
-    const viewports = [
-      { name: "desktop", width: 1440, height: 1000, mobile: false, scale: 1 },
-      { name: "mobile", width: 390, height: 844, mobile: true, scale: 2 }
-    ];
-    const issues: SiteQualityIssue[] = [...inspection.issues];
-    const screenshots: string[] = [];
-    for (const viewport of viewports) {
-      const result = await inspectViewport(cdp, inspection.url, outputDir, viewport);
-      issues.push(...result.issues);
-      if (result.screenshotPath) screenshots.push(result.screenshotPath);
+      if (process.platform !== "win32") {
+        launchArgs.splice(1, 0, "--no-sandbox", "--disable-dev-shm-usage", "--disable-software-rasterizer");
+      }
+      chrome = spawn(chromePath, launchArgs, {
+        windowsHide: true,
+        stdio: "ignore",
+        detached: process.platform !== "win32"
+      });
+      await waitForDevTools(port);
+      const tab = await openTab(port);
+      cdp = await connectCdp(tab.webSocketDebuggerUrl);
+      for (const viewport of viewports) {
+        const result = await inspectViewport(cdp, inspection.url, outputDir, viewport);
+        issues.push(...result.issues);
+        if (result.screenshotPath) screenshots.push(result.screenshotPath);
+      }
     }
 
     const status = issues.some((issue) => issue.severity === "error") ? "failed" : issues.length ? "warning" : "passed";

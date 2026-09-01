@@ -33,6 +33,13 @@ type CdpSession = {
   close(): void;
 };
 
+export function siteQualityCdpTimeoutMs(raw = process.env.SITE_QUALITY_CDP_TIMEOUT_MS) {
+  const fallback = process.platform === "win32" ? 30_000 : 120_000;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(300_000, Math.max(30_000, Math.floor(parsed)));
+}
+
 const chromeCandidates = [
   process.env.CHROME_PATH,
   "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
@@ -155,7 +162,7 @@ function messageToString(data: unknown): string {
   return String(data || "");
 }
 
-async function connectCdp(webSocketDebuggerUrl: string): Promise<CdpSession> {
+async function connectCdp(webSocketDebuggerUrl: string, commandTimeoutMs = siteQualityCdpTimeoutMs()): Promise<CdpSession> {
   const socket = new WebSocket(webSocketDebuggerUrl);
   await new Promise<void>((resolve, reject) => {
     socket.addEventListener("open", () => resolve(), { once: true });
@@ -189,7 +196,7 @@ async function connectCdp(webSocketDebuggerUrl: string): Promise<CdpSession> {
         const timer = setTimeout(() => {
           pending.delete(id);
           reject(new Error(`${method} timed out.`));
-        }, 30000);
+        }, commandTimeoutMs);
         pending.set(id, {
           resolve: (value) => {
             clearTimeout(timer);
@@ -206,6 +213,30 @@ async function connectCdp(webSocketDebuggerUrl: string): Promise<CdpSession> {
       socket.close();
     }
   };
+}
+
+async function terminateChrome(chrome: ChildProcess | null) {
+  if (!chrome || chrome.exitCode !== null || chrome.signalCode !== null) return;
+
+  const exited = new Promise<void>((resolve) => chrome.once("exit", () => resolve()));
+  const signalProcess = (signal: NodeJS.Signals) => {
+    try {
+      if (process.platform !== "win32" && chrome.pid) {
+        process.kill(-chrome.pid, signal);
+      } else {
+        chrome.kill(signal);
+      }
+    } catch {
+      chrome.kill(signal);
+    }
+  };
+
+  signalProcess("SIGTERM");
+  await Promise.race([exited, sleep(3000)]);
+  if (chrome.exitCode === null && chrome.signalCode === null) {
+    signalProcess("SIGKILL");
+    await Promise.race([exited, sleep(1000)]);
+  }
 }
 
 function qaExpression(viewport: string) {
@@ -541,7 +572,7 @@ export async function runSiteQualityCheck(input: { url: string; jobId: string; f
     chrome = spawn(
       chromePath,
       launchArgs,
-      { windowsHide: true, stdio: "ignore" }
+      { windowsHide: true, stdio: "ignore", detached: process.platform !== "win32" }
     );
     await waitForDevTools(port);
     const tab = await openTab(port);
@@ -587,6 +618,6 @@ export async function runSiteQualityCheck(input: { url: string; jobId: string; f
     };
   } finally {
     cdp?.close();
-    chrome?.kill();
+    await terminateChrome(chrome);
   }
 }

@@ -38,7 +38,11 @@ const chromeCandidates = [
   "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
-  "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
+  "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+  "/usr/bin/chromium",
+  "/usr/bin/chromium-browser",
+  "/usr/bin/google-chrome",
+  "/usr/bin/google-chrome-stable"
 ].filter(Boolean) as string[];
 
 function sleep(ms: number) {
@@ -486,8 +490,8 @@ async function inspectViewport(
   return { issues, screenshotPath };
 }
 
-export async function runSiteQualityCheck(input: { url: string; jobId: string }): Promise<SiteQualityCheckResult> {
-  if (siteQualityGateMode() === "off") {
+export async function runSiteQualityCheck(input: { url: string; jobId: string; force?: boolean }): Promise<SiteQualityCheckResult> {
+  if (!input.force && siteQualityGateMode() === "off") {
     return {
       status: "skipped",
       summary: "自动成品自检已关闭。",
@@ -518,9 +522,7 @@ export async function runSiteQualityCheck(input: { url: string; jobId: string })
   let cdp: CdpSession | null = null;
 
   try {
-    chrome = spawn(
-      chromePath,
-      [
+    const launchArgs = [
         "--headless",
         `--remote-debugging-port=${port}`,
         "--remote-allow-origins=*",
@@ -532,7 +534,13 @@ export async function runSiteQualityCheck(input: { url: string; jobId: string })
         "--no-first-run",
         "--no-default-browser-check",
         "about:blank"
-      ],
+      ];
+    if (process.platform !== "win32") {
+      launchArgs.splice(1, 0, "--no-sandbox", "--disable-dev-shm-usage", "--disable-software-rasterizer");
+    }
+    chrome = spawn(
+      chromePath,
+      launchArgs,
       { windowsHide: true, stdio: "ignore" }
     );
     await waitForDevTools(port);

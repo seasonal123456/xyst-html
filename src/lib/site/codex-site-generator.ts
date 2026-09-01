@@ -1007,7 +1007,7 @@ export function buildPrompt(brief: unknown, outputMode: "workspace" | "raw_html"
     outputMode === "raw_html"
       ? `Return exactly one complete HTML document starting with <!doctype html> and ending with </html>.
 Do not use Markdown fences, explanations, summaries, filenames, or any text before/after the HTML document.
-Keep the HTML and CSS concise enough to finish within the output limit. Prioritize complete structure, approved copy, required images, responsive layout, and closing </body></html> over decorative code volume.`
+Use enough HTML, CSS, and lightweight interaction code to meet the full visual-quality specification. Do not shorten or flatten the design merely to reduce output size. Always reserve enough output budget to finish the complete document and closing </body></html>.`
       : `Create a polished, production-looking website preview in the folder named site.`;
   const fileInstruction =
     outputMode === "raw_html"
@@ -1105,7 +1105,7 @@ ${designPresetPrompt}
   6. Check desktop and mobile mentally before finalizing: no horizontal scroll, no broken image placeholders, no awkward one-character/one-word line breaks.
   7. Desktop floating layers must not cover important content. Mobile floating layers must degrade into normal stacked modules.
   8. Long Chinese copy must obey Brief JSON layoutTextBudget. If a title/card/button is too long, rewrite it shorter before finalizing.
-- Keep the implementation concise enough to finish quickly.
+- Build the complete customer-facing experience. Visual richness, section completeness, responsive behavior, and careful interaction details are required; brevity is not a quality goal.
 - Quality gate before final answer: inspect your own HTML/CSS mentally. If it lacks obvious curved/diagonal/gradient transitions, layered cutout composition, and hover dynamics, revise site/index.html before summarizing.
 
 ${expectedOutput}

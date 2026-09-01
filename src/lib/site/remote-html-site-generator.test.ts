@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   ChatCompletionSseParser,
+  codexEquivalentHtmlIssues,
   extractRemoteHtml,
   isStructurallyValidImage,
+  remoteDesignPlanSystemPrompt,
+  remoteWebsiteSystemPrompt,
   shouldRetryIncompleteRemoteHtml,
   validateRemoteHtml
 } from "./remote-html-site-generator";
@@ -58,4 +61,19 @@ test("rejects a truncated PNG before sending it to the remote model", () => {
 test("retries only incomplete HTML and never retries unsafe output", () => {
   assert.equal(shouldRetryIncompleteRemoteHtml(validateRemoteHtml("<!doctype html><html><head><style></style></head><body>partial")), true);
   assert.equal(shouldRetryIncompleteRemoteHtml(validateRemoteHtml(`${validHtml}<form></form>`)), false);
+});
+
+test("Codex-equivalent system prompt prioritizes full craft instead of brevity", () => {
+  const systemPrompt = remoteWebsiteSystemPrompt("codex_equivalent");
+  assert.match(systemPrompt, /Codex-grade/);
+  assert.match(systemPrompt, /Do not optimize for brevity/);
+  assert.doesNotMatch(systemPrompt, /concise/);
+  assert.match(remoteDesignPlanSystemPrompt(), /implementation blueprint/);
+});
+
+test("Codex-equivalent deterministic gate rejects thin generic HTML", () => {
+  const issues = codexEquivalentHtmlIssues(validHtml, ["https://example.com/required.png"]);
+  assert.ok(issues.some((issue) => issue.includes("30000")));
+  assert.ok(issues.some((issue) => issue.includes("section")));
+  assert.ok(issues.some((issue) => issue.includes("规定内容图片")));
 });

@@ -1,5 +1,6 @@
 import path from "path";
-import { appendFile, mkdir, writeFile } from "fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "fs/promises";
+import { pathToFileURL } from "url";
 import { elapsedMs, extractUsageFromResponse, recordModelUsage, type ParsedModelUsage } from "@/lib/model-usage";
 import {
   buildBrief,
@@ -11,6 +12,7 @@ import {
   type GenerateSitePreviewOptions
 } from "@/lib/site/codex-site-generator";
 import type { SiteJobDto, StyleConceptDto } from "@/lib/site/site-types";
+import { runSiteQualityCheck, type SiteQualityCheckResult } from "@/lib/site/site-quality-checker";
 import { downloadAliyunOssObject, rootRelativeUrlToAliyunOssUrl } from "@/lib/storage/aliyun-oss-storage";
 
 export type RemoteHtmlSitePreviewResult = {
@@ -19,6 +21,19 @@ export type RemoteHtmlSitePreviewResult = {
   generator: "remote_html";
   runDir: string;
   message?: string;
+};
+
+export type PreparedRemoteHtmlExperimentResult = {
+  outputDir: string;
+  indexPath: string;
+  model: string;
+  reasoningEffort?: string;
+  qualityMode: "codex_equivalent";
+  durationMs: number;
+  htmlCharacters: number;
+  initialQualityCheck: SiteQualityCheckResult;
+  finalQualityCheck: SiteQualityCheckResult;
+  deterministicIssues: string[];
 };
 
 type RemoteHtmlConfig = {
@@ -30,6 +45,8 @@ type RemoteHtmlConfig = {
   reasoningEffort?: string;
   maxImageInputs: number;
   maxImageBytes: number;
+  qualityMode: "single_pass" | "codex_equivalent";
+  planningMaxTokens: number;
 };
 
 type RemoteImageInput = {
@@ -60,6 +77,11 @@ type ChatStreamEvent = {
   usage?: unknown;
 };
 
+type QualityRepairContext = {
+  html: string;
+  issues: string[];
+};
+
 function safeName(value: string) {
   return value.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 96) || "site";
 }
@@ -85,16 +107,42 @@ function remoteHtmlConfig(): RemoteHtmlConfig {
   if (!baseUrl) throw new Error("远程官网生成接口未配置 REMOTE_SITE_API_BASE_URL。");
   if (!apiKey) throw new Error("远程官网生成接口未配置 REMOTE_SITE_API_KEY。");
 
+  const qualityMode = process.env.REMOTE_SITE_QUALITY_MODE?.trim().toLowerCase() === "codex_equivalent" ? "codex_equivalent" : "single_pass";
   return {
     url: buildApiUrl(baseUrl, process.env.REMOTE_SITE_API_ENDPOINT?.trim() || "/v1/chat/completions"),
     apiKey,
     model: process.env.REMOTE_SITE_MODEL?.trim() || "gpt-5.6-sol",
     timeoutMs: positiveInteger(process.env.REMOTE_SITE_TIMEOUT_MS, 900_000, 1_800_000),
-    maxOutputTokens: positiveInteger(process.env.REMOTE_SITE_MAX_OUTPUT_TOKENS, 24_000, 128_000),
-    reasoningEffort: process.env.REMOTE_SITE_REASONING_EFFORT?.trim() || undefined,
+    maxOutputTokens: positiveInteger(process.env.REMOTE_SITE_MAX_OUTPUT_TOKENS, qualityMode === "codex_equivalent" ? 48_000 : 24_000, 128_000),
+    reasoningEffort: process.env.REMOTE_SITE_REASONING_EFFORT?.trim() || (qualityMode === "codex_equivalent" ? "high" : undefined),
     maxImageInputs: positiveInteger(process.env.REMOTE_SITE_MAX_IMAGE_INPUTS, 12, 40),
-    maxImageBytes: positiveInteger(process.env.REMOTE_SITE_MAX_IMAGE_BYTES, 8_000_000, 20_000_000)
+    maxImageBytes: positiveInteger(process.env.REMOTE_SITE_MAX_IMAGE_BYTES, 8_000_000, 20_000_000),
+    qualityMode,
+    planningMaxTokens: positiveInteger(process.env.REMOTE_SITE_PLANNING_MAX_TOKENS, 8_000, 24_000)
   };
+}
+
+export function remoteWebsiteSystemPrompt(qualityMode: RemoteHtmlConfig["qualityMode"]) {
+  if (qualityMode === "codex_equivalent") {
+    return [
+      "You are a Codex-grade senior frontend designer and engineer producing a real customer website.",
+      "Follow the complete specification and the approved design blueprint with equal care across the hero and every lower section.",
+      "Return only one complete, production-ready, self-contained HTML document.",
+      "Do not optimize for brevity. Use sufficient HTML, CSS, responsive behavior, visual layering, and lightweight interaction to meet every quality gate.",
+      "Preserve approved business facts and required images, avoid generic template output, and always finish with closing body and html tags."
+    ].join(" ");
+  }
+  return "You are a senior frontend engineer. Follow the complete user specification. Return only one production-ready, self-contained HTML document. Always finish with closing body and html tags.";
+}
+
+export function remoteDesignPlanSystemPrompt() {
+  return [
+    "You are the design director for a customer-facing official website.",
+    "Study the complete brief and attached visual references before planning.",
+    "Produce a concrete implementation blueprint for another senior frontend engineer.",
+    "Cover the hero composition, every lower section, exact image placement, visual motifs, transitions, responsive behavior, typography, interaction, and factual constraints.",
+    "Do not write HTML. Do not omit approved sections. Return a compact but specific JSON object only."
+  ].join(" ");
 }
 
 function contentText(value: ChatStreamChoice | undefined) {
@@ -191,6 +239,28 @@ export function validateRemoteHtml(html: string) {
     if (pattern.test(html)) errors.push(message);
   }
   return errors;
+}
+
+export function codexEquivalentHtmlIssues(html: string, requiredImageUrls: string[] = []) {
+  const issues: string[] = [];
+  const count = (pattern: RegExp) => Array.from(html.matchAll(pattern)).length;
+  const sectionCount = count(/<section\b/gi);
+  const headingCount = count(/<h2\b/gi);
+  if (html.length < 30_000) issues.push(`HTML 仅 ${html.length} 字符，低于 Codex 同等质量模式的 30000 字符完整度基线。`);
+  if (sectionCount < 6) issues.push(`页面只有 ${sectionCount} 个 section，至少需要 6 个完整板块。`);
+  if (headingCount < 5) issues.push(`页面只有 ${headingCount} 个二级标题，较难覆盖完整官网内容。`);
+  if (!/@media\b/i.test(html)) issues.push("缺少明确的响应式媒体查询。");
+  if (!/:hover\b/i.test(html) || !/:focus-visible\b/i.test(html)) issues.push("按钮、导航或内容元素缺少完整 hover/focus-visible 状态。");
+  if (!/prefers-reduced-motion/i.test(html)) issues.push("缺少 prefers-reduced-motion 动画降级。");
+  if (!/<script\b/i.test(html) || !/(pointermove|mousemove|IntersectionObserver|scroll)/i.test(html)) {
+    issues.push("缺少轻量、渐进增强的页面交互或滚动呈现细节。");
+  }
+  const craftedVisualCount = count(/(?:clip-path|mask(?:-image)?\s*:|linear-gradient\(|radial-gradient\(|conic-gradient\()/gi);
+  if (craftedVisualCount < 6) issues.push(`视觉层次表达只有 ${craftedVisualCount} 处，曲线、遮罩或渐变衔接不足。`);
+  for (const url of requiredImageUrls) {
+    if (!html.includes(url)) issues.push(`缺少规定内容图片：${url}`);
+  }
+  return issues;
 }
 
 export function shouldRetryIncompleteRemoteHtml(errors: string[]) {
@@ -306,23 +376,34 @@ async function remoteImageInputs(
   return inputs;
 }
 
-async function callRemoteHtmlApi(config: RemoteHtmlConfig, prompt: string, images: RemoteImageInput[], siteJobId: string, diagnosticsDir: string) {
-  const messageContent: Array<Record<string, unknown>> = [{ type: "text", text: prompt }];
-  for (const image of images) {
-    messageContent.push({ type: "text", text: image.label });
-    messageContent.push({ type: "image_url", image_url: { url: image.providerUrl } });
-  }
+async function callRemoteHtmlApi(
+  config: RemoteHtmlConfig,
+  prompt: string,
+  images: RemoteImageInput[],
+  siteJobId: string,
+  diagnosticsDir: string,
+  qualityRepair?: QualityRepairContext
+) {
+  const contentWithImages = (text: string) => {
+    const content: Array<Record<string, unknown>> = [{ type: "text", text }];
+    for (const image of images) {
+      content.push({ type: "text", text: image.label });
+      content.push({ type: "image_url", image_url: { url: image.providerUrl } });
+    }
+    return content;
+  };
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.timeoutMs);
   const startedAt = Date.now();
   const attempts: StreamState[] = [];
-  const request = async (messages: Array<Record<string, unknown>>) => {
+  let designPlan = "";
+  const request = async (messages: Array<Record<string, unknown>>, maxTokens = config.maxOutputTokens, label = "generation") => {
     const body: Record<string, unknown> = {
       model: config.model,
       stream: true,
       stream_options: { include_usage: true },
-      max_tokens: config.maxOutputTokens,
+      max_tokens: maxTokens,
       messages
     };
     if (config.reasoningEffort) body.reasoning_effort = config.reasoningEffort;
@@ -354,19 +435,44 @@ async function callRemoteHtmlApi(config: RemoteHtmlConfig, prompt: string, image
     parser.push(decoder.decode());
     const result = parser.finish();
     attempts.push(result);
-    await writeFile(path.join(diagnosticsDir, `remote-response-attempt-${attempts.length}.txt`), result.content, "utf8");
+    await writeFile(path.join(diagnosticsDir, `remote-response-attempt-${attempts.length}-${label}.txt`), result.content, "utf8");
     return result;
   };
 
   try {
+    if (config.qualityMode === "codex_equivalent" && !qualityRepair) {
+      const planning = await request(
+        [
+          { role: "system", content: remoteDesignPlanSystemPrompt() },
+          {
+            role: "user",
+            content: contentWithImages(
+              `${prompt}\n\nCreate the mandatory design implementation blueprint now. The blueprint must preserve every approved content section and assign every allowed content image a deliberate role.`
+            )
+          }
+        ],
+        config.planningMaxTokens,
+        "design-plan"
+      );
+      designPlan = planning.content.trim();
+      if (designPlan.length < 200) throw new Error("远程模型返回的设计规划过短，已停止生成低质量官网。");
+      await writeFile(path.join(diagnosticsDir, "remote-design-plan.txt"), designPlan, "utf8");
+    }
+
+    const generationSpecification = qualityRepair
+      ? `${prompt}\n\nYou are performing the mandatory final Codex-equivalent review and repair pass.\n\nCurrent complete HTML:\n${qualityRepair.html}\n\nDetected desktop/mobile and structural issues:\n${qualityRepair.issues.map((issue, index) => `${index + 1}. ${issue}`).join("\n") || "No deterministic errors were detected. Still inspect the attached screenshots for generic composition, weak section hierarchy, poor visual balance, image cropping, text crowding, and mobile problems."}\n\nReturn a complete revised HTML document. Preserve all correct approved copy and required images, but visibly improve any weak or generic design. Do not return a patch or explanation.`
+      : designPlan
+        ? `${prompt}\n\nMandatory approved design blueprint:\n${designPlan}\n\nImplement this blueprint completely. It is not optional. Return only the final HTML document.`
+        : prompt;
     let result = await request([
       {
         role: "system",
-        content:
-          "You are a senior frontend engineer. Follow the complete user specification. Return only one concise, production-ready, self-contained HTML document. Always finish with closing body and html tags."
+        content: qualityRepair
+          ? "You are the final Codex-grade frontend reviewer and repair engineer. Inspect the current HTML and attached desktop/mobile screenshots, fix every reported or visible issue, preserve business facts and required images, and return only one fully revised production-ready self-contained HTML document. Do not optimize for brevity."
+          : remoteWebsiteSystemPrompt(config.qualityMode)
       },
-      { role: "user", content: messageContent }
-    ]);
+      { role: "user", content: contentWithImages(generationSpecification) }
+    ], config.maxOutputTokens, qualityRepair ? "quality-repair" : "final-html");
     let html = extractRemoteHtml(result.content);
     let errors = validateRemoteHtml(html);
 
@@ -375,13 +481,13 @@ async function callRemoteHtmlApi(config: RemoteHtmlConfig, prompt: string, image
         {
           role: "system",
           content:
-            "Repair a truncated website response. Return only one complete, concise, self-contained HTML document. Preserve approved content and useful design, remove no required customer images, use inline CSS, and always close head, body, and html. Do not use Markdown fences, forms, frames, external scripts/styles, or network calls."
+            "Repair a truncated website response. Return only one complete, production-quality, self-contained HTML document. Preserve the approved content, design richness, responsive behavior, and all required customer images. Use inline CSS and always close head, body, and html. Do not use Markdown fences, forms, frames, external scripts/styles, or network calls."
         },
         {
           role: "user",
-          content: `Original website specification:\n${prompt}\n\nTruncated response to repair:\n${result.content}`
+          content: `Original website specification and approved blueprint:\n${generationSpecification}\n\nTruncated response to repair:\n${result.content}`
         }
-      ]);
+      ], config.maxOutputTokens, "truncation-repair");
       html = extractRemoteHtml(result.content);
       errors = validateRemoteHtml(html);
     }
@@ -408,7 +514,12 @@ async function callRemoteHtmlApi(config: RemoteHtmlConfig, prompt: string, image
         finishReasons: attempts.map((attempt) => attempt.finishReason || null),
         responseCharacters: attempts.map((attempt) => attempt.content.length),
         imageInputCount: images.length,
-        timeoutMs: config.timeoutMs
+        timeoutMs: config.timeoutMs,
+        qualityMode: config.qualityMode,
+        stage: qualityRepair ? "quality_repair" : "initial_generation",
+        designPlanCharacters: designPlan.length,
+        reasoningEffort: config.reasoningEffort || null,
+        maxOutputTokens: config.maxOutputTokens
       },
       ...usage
     });
@@ -439,7 +550,12 @@ async function callRemoteHtmlApi(config: RemoteHtmlConfig, prompt: string, image
         finishReasons: attempts.map((attempt) => attempt.finishReason || null),
         responseCharacters: attempts.map((attempt) => attempt.content.length),
         imageInputCount: images.length,
-        timeoutMs: config.timeoutMs
+        timeoutMs: config.timeoutMs,
+        qualityMode: config.qualityMode,
+        stage: qualityRepair ? "quality_repair" : "initial_generation",
+        designPlanCharacters: designPlan.length,
+        reasoningEffort: config.reasoningEffort || null,
+        maxOutputTokens: config.maxOutputTokens
       },
       ...combinedUsage(attempts.map((attempt) => attempt.usage)),
       error: normalized
@@ -448,6 +564,128 @@ async function callRemoteHtmlApi(config: RemoteHtmlConfig, prompt: string, image
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function screenshotImageInputs(paths: string[], maximumBytes: number): Promise<RemoteImageInput[]> {
+  const inputs: RemoteImageInput[] = [];
+  for (let index = 0; index < paths.length; index += 1) {
+    const screenshotPath = paths[index];
+    const buffer = await readFile(screenshotPath).catch(() => null);
+    if (!buffer || buffer.length > maximumBytes || !isStructurallyValidImage(buffer, "image/png")) continue;
+    inputs.push({
+      sourceUrl: screenshotPath,
+      providerUrl: bufferDataUrl(buffer, "image/png"),
+      label: `${index === 0 ? "Desktop" : "Mobile"} screenshot of the first generated website. Inspect it for visual and responsive defects before revising.`,
+      mimeType: "image/png",
+      bytes: buffer.length
+    });
+  }
+  return inputs;
+}
+
+function imageMimeTypeFromPath(filePath: string) {
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension === ".jpg" || extension === ".jpeg") return "image/jpeg";
+  if (extension === ".webp") return "image/webp";
+  if (extension === ".gif") return "image/gif";
+  return "image/png";
+}
+
+export async function runPreparedRemoteHtmlExperiment(input: {
+  prompt: string;
+  siteJobId: string;
+  outputDir: string;
+  imageFiles: Array<{ path: string; label: string }>;
+  requiredImageUrls?: string[];
+  model?: string;
+  reasoningEffort?: string;
+  maxOutputTokens?: number;
+}): Promise<PreparedRemoteHtmlExperimentResult> {
+  const baseConfig = remoteHtmlConfig();
+  const config: RemoteHtmlConfig = {
+    ...baseConfig,
+    qualityMode: "codex_equivalent",
+    model: input.model?.trim() || "gpt-5.6-sol",
+    reasoningEffort: input.reasoningEffort?.trim() || "high",
+    maxOutputTokens: input.maxOutputTokens || Math.max(48_000, baseConfig.maxOutputTokens)
+  };
+  const outputDir = path.resolve(input.outputDir);
+  const siteDir = path.join(outputDir, "site");
+  const indexPath = path.join(siteDir, "index.html");
+  await mkdir(siteDir, { recursive: true });
+  const images: RemoteImageInput[] = [];
+  for (const imageFile of input.imageFiles.slice(0, config.maxImageInputs)) {
+    const buffer = await readFile(imageFile.path);
+    const mimeType = imageMimeTypeFromPath(imageFile.path);
+    if (buffer.length > config.maxImageBytes) throw new Error(`实验图片超过大小限制：${imageFile.path}`);
+    if (!isStructurallyValidImage(buffer, mimeType)) throw new Error(`实验图片结构无效：${imageFile.path}`);
+    images.push({
+      sourceUrl: imageFile.path,
+      providerUrl: bufferDataUrl(buffer, mimeType),
+      label: imageFile.label,
+      mimeType,
+      bytes: buffer.length
+    });
+  }
+  await writeFile(
+    path.join(outputDir, "experiment-config.json"),
+    JSON.stringify(
+      {
+        siteJobId: input.siteJobId,
+        model: config.model,
+        reasoningEffort: config.reasoningEffort,
+        qualityMode: config.qualityMode,
+        maxOutputTokens: config.maxOutputTokens,
+        planningMaxTokens: config.planningMaxTokens,
+        imageCount: images.length,
+        requiredImageCount: input.requiredImageUrls?.length || 0
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
+
+  const startedAt = Date.now();
+  let generated = await callRemoteHtmlApi(config, input.prompt, images, input.siteJobId, outputDir);
+  await writeFile(path.join(outputDir, "initial-index.html"), generated.html, "utf8");
+  await writeFile(indexPath, generated.html, "utf8");
+  const initialQualityCheck = await runSiteQualityCheck({ url: pathToFileURL(indexPath).toString(), jobId: `${input.siteJobId}-experiment-initial`, force: true });
+  await writeFile(path.join(outputDir, "initial-quality-check.json"), JSON.stringify(initialQualityCheck, null, 2), "utf8");
+  const initialIssues = [
+    ...codexEquivalentHtmlIssues(generated.html, input.requiredImageUrls || []),
+    ...initialQualityCheck.issues.map(
+      (issue) => `${issue.viewport} ${issue.severity} ${issue.code}: ${issue.message}${issue.detail ? ` (${issue.detail})` : ""}`
+    )
+  ];
+  const screenshots = await screenshotImageInputs(initialQualityCheck.screenshots, config.maxImageBytes);
+  generated = await callRemoteHtmlApi(
+    config,
+    input.prompt,
+    [...images, ...screenshots].slice(0, config.maxImageInputs),
+    input.siteJobId,
+    outputDir,
+    { html: generated.html, issues: initialIssues }
+  );
+  await writeFile(indexPath, generated.html, "utf8");
+  const finalQualityCheck = await runSiteQualityCheck({ url: pathToFileURL(indexPath).toString(), jobId: `${input.siteJobId}-experiment-final`, force: true });
+  await writeFile(path.join(outputDir, "final-quality-check.json"), JSON.stringify(finalQualityCheck, null, 2), "utf8");
+  const deterministicIssues = codexEquivalentHtmlIssues(generated.html, input.requiredImageUrls || []);
+  await writeFile(path.join(outputDir, "final-deterministic-issues.json"), JSON.stringify(deterministicIssues, null, 2), "utf8");
+  const result: PreparedRemoteHtmlExperimentResult = {
+    outputDir,
+    indexPath,
+    model: config.model,
+    reasoningEffort: config.reasoningEffort,
+    qualityMode: "codex_equivalent",
+    durationMs: elapsedMs(startedAt),
+    htmlCharacters: generated.html.length,
+    initialQualityCheck,
+    finalQualityCheck,
+    deterministicIssues
+  };
+  await writeFile(path.join(outputDir, "experiment-result.json"), JSON.stringify(result, null, 2), "utf8");
+  return result;
 }
 
 export async function generateRemoteHtmlWebsitePreview(
@@ -480,8 +718,39 @@ export async function generateRemoteHtmlWebsitePreview(
   );
   await appendFile(path.join(runDir, "remote-progress.log"), `[${new Date().toISOString()}] calling ${config.model}; images=${images.length}; timeoutMs=${config.timeoutMs}\n`, "utf8");
 
-  const generated = await callRemoteHtmlApi(config, prompt, images, job.id, runDir);
-  await writeFile(path.join(siteDir, "index.html"), generated.html, "utf8");
+  let generated = await callRemoteHtmlApi(config, prompt, images, job.id, runDir);
+  let initialQualityCheck: SiteQualityCheckResult | undefined;
+  let finalQualityCheck: SiteQualityCheckResult | undefined;
+  const requiredImageUrls = contentAssets.filter((asset) => asset.mimeType.startsWith("image/")).map((asset) => asset.url);
+  const indexPath = path.join(siteDir, "index.html");
+  await writeFile(indexPath, generated.html, "utf8");
+
+  if (config.qualityMode === "codex_equivalent") {
+    initialQualityCheck = await runSiteQualityCheck({ url: pathToFileURL(indexPath).toString(), jobId: `${job.id}-initial`, force: true });
+    await writeFile(path.join(runDir, "initial-quality-check.json"), JSON.stringify(initialQualityCheck, null, 2), "utf8");
+    const deterministicIssues = codexEquivalentHtmlIssues(generated.html, requiredImageUrls);
+    const browserIssues = initialQualityCheck.issues.map(
+      (issue) => `${issue.viewport} ${issue.severity} ${issue.code}: ${issue.message}${issue.detail ? ` (${issue.detail})` : ""}`
+    );
+    const screenshotInputs = await screenshotImageInputs(initialQualityCheck.screenshots, config.maxImageBytes);
+    generated = await callRemoteHtmlApi(
+      config,
+      prompt,
+      [...images, ...screenshotInputs].slice(0, config.maxImageInputs),
+      job.id,
+      runDir,
+      { html: generated.html, issues: [...deterministicIssues, ...browserIssues] }
+    );
+    await writeFile(indexPath, generated.html, "utf8");
+    finalQualityCheck = await runSiteQualityCheck({ url: pathToFileURL(indexPath).toString(), jobId: `${job.id}-final`, force: true });
+    await writeFile(path.join(runDir, "final-quality-check.json"), JSON.stringify(finalQualityCheck, null, 2), "utf8");
+    const finalDeterministicIssues = codexEquivalentHtmlIssues(generated.html, requiredImageUrls);
+    await writeFile(path.join(runDir, "final-deterministic-issues.json"), JSON.stringify(finalDeterministicIssues, null, 2), "utf8");
+    if (finalQualityCheck.status === "failed" || finalDeterministicIssues.length) {
+      const details = [...finalDeterministicIssues, ...finalQualityCheck.issues.filter((issue) => issue.severity === "error").map((issue) => issue.message)];
+      throw new Error(`Codex 同等质量模式最终检查未通过：${details.slice(0, 8).join("；")}`);
+    }
+  }
   await writeFile(
     path.join(runDir, "remote-result.json"),
     JSON.stringify(
@@ -491,7 +760,14 @@ export async function generateRemoteHtmlWebsitePreview(
         finishReasons: generated.finishReasons,
         eventCount: generated.eventCount,
         durationMs: generated.durationMs,
-        htmlCharacters: generated.html.length
+        htmlCharacters: generated.html.length,
+        qualityMode: config.qualityMode,
+        initialQualityCheck: initialQualityCheck
+          ? { status: initialQualityCheck.status, issueCount: initialQualityCheck.issueCount, reportPath: initialQualityCheck.reportPath }
+          : null,
+        finalQualityCheck: finalQualityCheck
+          ? { status: finalQualityCheck.status, issueCount: finalQualityCheck.issueCount, reportPath: finalQualityCheck.reportPath }
+          : null
       },
       null,
       2

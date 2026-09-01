@@ -162,10 +162,43 @@ function buildSiteImagePrompt(job: SiteJobDto, style: StyleConceptDto, slot: "he
   ].join("\n");
 }
 
+export function isSiteImageSafetyRejection(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return /safety(?:_|\s|-)?violations?|safety system|content[_\s-]?policy|moderation|request was rejected.*safety|sexual/i.test(message);
+}
+
+function safeRetryColorDirection(style: StyleConceptDto) {
+  const source = [style.styleName, style.styleDescription, style.emotionalDescription, style.colorTendency].filter(Boolean).join(" ");
+  const colors = ["黑", "白", "灰", "红", "橙", "黄", "绿", "青", "蓝", "紫", "金", "银"]
+    .filter((color) => source.includes(color))
+    .slice(0, 3);
+  return colors.length ? `配色以${colors.join("、")}为主，保持现代、高对比和清晰商业质感。` : "使用中性、高对比、现代的商业品牌配色。";
+}
+
+export function buildSafetyRetrySiteImagePrompt(style: StyleConceptDto, slot: "hero" | "scene" | "detail") {
+  const slotInstruction =
+    slot === "hero"
+      ? "横向官网首屏品牌主视觉，主体集中在一侧，并留出宽敞、干净的文字叠加区域。"
+      : slot === "scene"
+        ? "官网中部可用的品牌陈列场景，展示包装、材质样片、工作台、货架或零售空间细节。"
+        : "官网下方可用的产品材质细节、包装局部、工具陈列或抽象品牌纹理。";
+
+  return [
+    "生成一张完全非敏感、适合公开企业官网的原创商业配图。",
+    slotInstruction,
+    "画面只展示不透明产品包装、平铺商品、材质纹理、印刷样片、工作室工具、货架陈列、桌面静物或抽象品牌图形。",
+    "画面必须是无人商业静物，不出现人物、穿戴展示、生活方式模特或情境表演。",
+    "只按本提示生成，不引用其他业务描述，不生成可读文字、商标、二维码、证书或真实品牌名。",
+    "不要生成网页截图、浏览器窗口、导航栏、卡片、按钮、App UI、仪表盘或设计稿拼贴。",
+    "画面要像真实品牌摄影或高级商品静物，清晰、高对比、主体明确，可直接用于响应式官网。",
+    safeRetryColorDirection(style)
+  ].join("\n");
+}
+
 async function requestSiteImage(
   config: SiteImageConfig,
   prompt: string,
-  context: { siteJobId: string; slot: "hero" | "scene" | "detail"; index: number }
+  context: { siteJobId: string; slot: "hero" | "scene" | "detail"; index: number; promptMode?: "business" | "safety_retry" }
 ): Promise<SiteImageApiResponse> {
   const body: Record<string, string | number> = {
     model: config.model,
@@ -181,7 +214,8 @@ async function requestSiteImage(
     size: config.size,
     quality: config.quality || undefined,
     slot: context.slot,
-    index: context.index
+    index: context.index,
+    promptMode: context.promptMode || "business"
   };
   let response: Response;
   try {
@@ -279,10 +313,38 @@ async function generateFallbackContentAssets(job: SiteJobDto, style: StyleConcep
       const result = await requestSiteImage(config, buildSiteImagePrompt(job, style, slots[index]), {
         siteJobId: job.id,
         slot: slots[index],
-        index
+        index,
+        promptMode: "business"
       });
       assets.push(await saveGeneratedSiteImage(job.id, index, result));
     } catch (error) {
+      if (isSiteImageSafetyRejection(error)) {
+        const retryBudget = await getSiteImageBudget(job.id);
+        if (retryBudget.remaining <= 0) {
+          throw new Error("官网内容配图触发了图片服务的内容安全审核，且当前图片额度不足以执行安全提示词重试。请调整敏感业务表述或上传合规产品图片后重试。");
+        }
+
+        try {
+          const retryResult = await requestSiteImage(config, buildSafetyRetrySiteImagePrompt(style, slots[index]), {
+            siteJobId: job.id,
+            slot: slots[index],
+            index,
+            promptMode: "safety_retry"
+          });
+          assets.push(await saveGeneratedSiteImage(job.id, index, retryResult));
+          continue;
+        } catch (retryError) {
+          console.warn(
+            `[site-content-image] safety retry failed for ${job.id}: ${
+              retryError instanceof Error ? retryError.message : String(retryError)
+            }`
+          );
+          throw new Error(
+            "官网内容配图未通过图片服务的内容安全审核。系统已自动改用不含人物、身体或暗示性场景的商品静物方案重试，仍未成功。请调整敏感业务表述或上传合规产品图片后重新生成。"
+          );
+        }
+      }
+
       console.warn(
         `[site-content-image] skipped generated content image for ${job.id}: ${
           error instanceof Error ? error.message : String(error)

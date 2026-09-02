@@ -1,6 +1,7 @@
-import { spawn, type ChildProcess } from "child_process";
+import { spawn, type ChildProcess, type SpawnOptions } from "child_process";
+import { tmpdir } from "os";
 import path from "path";
-import { access, mkdir, readFile, writeFile } from "fs/promises";
+import { access, mkdir, open, readFile, rm, writeFile } from "fs/promises";
 import { fileURLToPath, pathToFileURL } from "url";
 
 export type SiteQualityIssue = {
@@ -225,13 +226,13 @@ async function connectCdp(webSocketDebuggerUrl: string, commandTimeoutMs = siteQ
   };
 }
 
-async function terminateChrome(chrome: ChildProcess | null) {
+async function terminateChrome(chrome: ChildProcess | null, useProcessGroup = process.platform !== "win32") {
   if (!chrome || chrome.exitCode !== null || chrome.signalCode !== null) return;
 
   const exited = new Promise<void>((resolve) => chrome.once("exit", () => resolve()));
   const signalProcess = (signal: NodeJS.Signals) => {
     try {
-      if (process.platform !== "win32" && chrome.pid) {
+      if (useProcessGroup && process.platform !== "win32" && chrome.pid) {
         process.kill(-chrome.pid, signal);
       } else {
         chrome.kill(signal);
@@ -458,60 +459,113 @@ function qaExpression(viewport: string) {
 
 function injectCliQualityProbe(html: string, baseHref: string, viewport: string) {
   const probe = `<script>
-(async () => {
-  if (document.readyState !== "complete") {
-    await new Promise((resolve) => window.addEventListener("load", resolve, { once: true }));
-  }
-  if (document.fonts && document.fonts.ready) await document.fonts.ready;
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  const issues = ${qaExpression(viewport)};
-  document.documentElement.setAttribute("data-codex-site-quality", encodeURIComponent(JSON.stringify(issues)));
-})().catch((error) => {
-  document.documentElement.setAttribute(
-    "data-codex-site-quality-error",
-    encodeURIComponent(error instanceof Error ? error.message : String(error))
-  );
-});
+(() => {
+  const run = () => {
+    try {
+      const issues = ${qaExpression(viewport)};
+      document.documentElement.setAttribute("data-codex-site-quality", encodeURIComponent(JSON.stringify(issues)));
+    } catch (error) {
+      document.documentElement.setAttribute(
+        "data-codex-site-quality-error",
+        encodeURIComponent(error instanceof Error ? error.message : String(error))
+      );
+    }
+  };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", run, { once: true });
+  else run();
+})();
 </script>`;
   const withBase = injectBaseHref(html, baseHref);
   if (/<\/body\s*>/i.test(withBase)) return withBase.replace(/<\/body\s*>/i, `${probe}\n</body>`);
   return `${withBase}\n${probe}`;
 }
 
-async function runChromeCli(chromePath: string, args: string[], timeoutMs: number) {
-  const chrome = spawn(chromePath, args, {
-    windowsHide: true,
-    stdio: ["ignore", "pipe", "pipe"],
-    detached: process.platform !== "win32"
-  });
-  let stdout = "";
-  let stderr = "";
-  chrome.stdout?.on("data", (chunk) => {
-    if (stdout.length < 12_000_000) stdout += chunk.toString("utf8");
-  });
-  chrome.stderr?.on("data", (chunk) => {
-    if (stderr.length < 1_000_000) stderr += chunk.toString("utf8");
-  });
+async function runChromeCli(chromePath: string, args: string[], timeoutMs: number, dumpPath: string, logPath: string) {
+  const shellQuote = (value: string) => `'${value.replace(/'/g, `'"'"'`)}'`;
+  if (process.platform !== "win32") {
+    const runtimeDir = path.dirname(dumpPath);
+    const scriptPath = path.join(runtimeDir, "run-chrome.sh");
+    const statusPath = path.join(runtimeDir, "status.txt");
+    const pidPath = path.join(runtimeDir, "runner.pid");
+    const command = `/usr/bin/timeout --kill-after=5s ${Math.ceil(timeoutMs / 1000)}s ${[chromePath, ...args].map(shellQuote).join(" ")} >${shellQuote(dumpPath)} 2>${shellQuote(logPath)}`;
+    await writeFile(
+      scriptPath,
+      `#!/usr/bin/env bash\nset +e\nprintf '%s\\n' "$$" > ${shellQuote(pidPath)}\n${command}\nrc=$?\nprintf '%s\\n' "$rc" > ${shellQuote(`${statusPath}.tmp`)}\nmv ${shellQuote(`${statusPath}.tmp`)} ${shellQuote(statusPath)}\nexit 0\n`,
+      "utf8"
+    );
 
+    const launcher = spawn(
+      "/bin/bash",
+      ["-lc", `nohup setsid /bin/bash ${shellQuote(scriptPath)} >/dev/null 2>&1 &`],
+      { windowsHide: true, stdio: "ignore", cwd: tmpdir() }
+    );
+    await new Promise<void>((resolve, reject) => {
+      launcher.once("error", reject);
+      launcher.once("exit", (code) => (code === 0 ? resolve() : reject(new Error(`Chrome CLI launcher exited with code ${code}.`))));
+    });
+
+    const deadline = Date.now() + timeoutMs + 15_000;
+    let exitCode: number | null = null;
+    while (Date.now() < deadline) {
+      const raw = await readFile(statusPath, "utf8").catch(() => "");
+      if (raw.trim()) {
+        exitCode = Number(raw.trim());
+        break;
+      }
+      await sleep(1000);
+    }
+    if (exitCode === null) {
+      const pid = Number((await readFile(pidPath, "utf8").catch(() => "")).trim());
+      if (Number.isInteger(pid) && pid > 1) {
+        try {
+          process.kill(-pid, "SIGTERM");
+        } catch {
+          // The timeout process may already be exiting.
+        }
+      }
+      throw new Error(`Chrome CLI timed out after ${timeoutMs}ms.`);
+    }
+    const stderr = await readFile(logPath, "utf8").catch(() => "");
+    if (exitCode !== 0) throw new Error(`Chrome CLI exited with code ${exitCode}: ${stderr.slice(-1000)}`);
+    return readFile(dumpPath, "utf8");
+  }
+
+  const dumpFile = await open(dumpPath, "w");
+  const logFile = await open(logPath, "w");
+  const chrome: ChildProcess = spawn(chromePath, args, {
+    windowsHide: true,
+    stdio: ["ignore", dumpFile.fd, logFile.fd],
+    env: process.env
+  } as SpawnOptions);
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let result: { code: number | null; signal: NodeJS.Signals | null } | undefined;
+  let failure: unknown;
   try {
-    const result = await Promise.race([
+    result = await Promise.race([
       new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
         chrome.once("error", reject);
         chrome.once("exit", (code, signal) => resolve({ code, signal }));
       }),
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`Chrome CLI timed out after ${timeoutMs}ms.`)), timeoutMs);
+        timer = setTimeout(() => reject(new Error(`Chrome CLI timed out after ${timeoutMs}ms.`)), timeoutMs + 5000);
       })
     ]);
-    if (result.code !== 0) {
-      throw new Error(`Chrome CLI exited with code ${result.code ?? "null"}${result.signal ? ` (${result.signal})` : ""}: ${stderr.slice(-1000)}`);
-    }
-    return stdout;
+  } catch (error) {
+    failure = error;
   } finally {
     if (timer) clearTimeout(timer);
-    await terminateChrome(chrome);
+    await terminateChrome(chrome, false);
+    await Promise.all([dumpFile.close(), logFile.close()]);
   }
+
+  const stderr = await readFile(logPath, "utf8").catch(() => "");
+  if (failure) {
+    throw new Error(`${failure instanceof Error ? failure.message : String(failure)}${stderr ? `: ${stderr.slice(-1000)}` : ""}`);
+  }
+  if (!result || result.code !== 0) {
+    throw new Error(`Chrome CLI exited with code ${result?.code ?? "null"}${result?.signal ? ` (${result.signal})` : ""}: ${stderr.slice(-1000)}`);
+  }
+  return readFile(dumpPath, "utf8");
 }
 
 async function inspectViewportWithCli(
@@ -523,9 +577,13 @@ async function inspectViewportWithCli(
   if (!url.startsWith("file:")) throw new Error(`Chrome CLI quality mode requires a local HTML snapshot: ${url}`);
   const sourcePath = fileURLToPath(url);
   const sourceHtml = await readFile(sourcePath, "utf8");
-  const inspectionPath = path.join(outputDir, `inspection-${viewport.name}.html`);
+  const runtimeDir = path.join(tmpdir(), "xinyingst-site-quality", path.basename(outputDir), viewport.name);
+  const inspectionPath = path.join(runtimeDir, "inspection.html");
   const screenshotPath = path.join(outputDir, `${viewport.name}.png`);
-  const profileDir = path.join(outputDir, `chrome-profile-${viewport.name}`);
+  const runtimeScreenshotPath = path.join(runtimeDir, "screenshot.png");
+  const profileDir = path.join(runtimeDir, "profile");
+  const dumpPath = path.join(runtimeDir, "dump.html");
+  const logPath = path.join(runtimeDir, "chrome.log");
   await mkdir(profileDir, { recursive: true });
   await writeFile(inspectionPath, injectCliQualityProbe(sourceHtml, url, viewport.name), "utf8");
 
@@ -547,7 +605,7 @@ async function inspectViewportWithCli(
     `--force-device-scale-factor=${viewport.scale}`,
     "--virtual-time-budget=8000",
     "--run-all-compositor-stages-before-draw",
-    `--screenshot=${screenshotPath}`,
+    `--screenshot=${runtimeScreenshotPath}`,
     "--dump-dom",
     pathToFileURL(inspectionPath).toString()
   ];
@@ -555,7 +613,17 @@ async function inspectViewportWithCli(
     args.splice(1, 0, "--no-sandbox", "--disable-dev-shm-usage", "--disable-software-rasterizer");
   }
 
-  const dumpedHtml = await runChromeCli(chromePath, args, siteQualityCliTimeoutMs());
+  let dumpedHtml = "";
+  try {
+    dumpedHtml = await runChromeCli(chromePath, args, siteQualityCliTimeoutMs(), dumpPath, logPath);
+    await writeFile(path.join(outputDir, `dump-${viewport.name}.html`), dumpedHtml, "utf8");
+    const chromeLog = await readFile(logPath, "utf8").catch(() => "");
+    if (chromeLog) await writeFile(path.join(outputDir, `chrome-${viewport.name}.log`), chromeLog, "utf8");
+    const screenshot = await readFile(runtimeScreenshotPath).catch(() => null);
+    if (screenshot) await writeFile(screenshotPath, screenshot);
+  } finally {
+    await rm(runtimeDir, { recursive: true, force: true }).catch(() => undefined);
+  }
   const encodedIssues = dumpedHtml.match(/\bdata-codex-site-quality="([^"]*)"/i)?.[1];
   const encodedError = dumpedHtml.match(/\bdata-codex-site-quality-error="([^"]*)"/i)?.[1];
   if (encodedError) throw new Error(`Chrome CLI probe failed: ${decodeURIComponent(encodedError)}`);

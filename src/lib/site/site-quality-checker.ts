@@ -3,6 +3,7 @@ import { tmpdir } from "os";
 import path from "path";
 import { access, mkdir, open, readFile, rm, writeFile } from "fs/promises";
 import { fileURLToPath, pathToFileURL } from "url";
+import { downloadAliyunOssObject } from "@/lib/storage/aliyun-oss-storage";
 
 export type SiteQualityIssue = {
   severity: "error" | "warning";
@@ -76,6 +77,36 @@ async function fileExists(filePath: string) {
   }
 }
 
+function imageDataUrl(buffer: Buffer, mimeType: string) {
+  return `data:${mimeType.split(";", 1)[0].trim()};base64,${buffer.toString("base64")}`;
+}
+
+export function replaceInspectableImageSources(html: string, replacements: Array<{ sourceUrl: string; dataUrl: string }>) {
+  let output = html;
+  for (const replacement of replacements) {
+    const escapedSource = replacement.sourceUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    output = output.replace(new RegExp(`(\\b(?:src|poster)\\s*=\\s*["'])${escapedSource}(["'])`, "gi"), (_match, prefix, suffix) => `${prefix}${replacement.dataUrl}${suffix}`);
+    output = output.replace(new RegExp(`(url\\(\\s*["']?)${escapedSource}(["']?\\s*\\))`, "gi"), (_match, prefix, suffix) => `${prefix}${replacement.dataUrl}${suffix}`);
+  }
+  return output;
+}
+
+async function inlineInspectableOssImages(html: string) {
+  const candidates = [
+    ...Array.from(html.matchAll(/\b(?:src|poster)\s*=\s*["'](https?:\/\/[^"']+)["']/gi), (match) => match[1]),
+    ...Array.from(html.matchAll(/url\(\s*["']?(https?:\/\/[^"')\s]+)["']?\s*\)/gi), (match) => match[1])
+  ]
+    .filter((url, index, urls) => urls.indexOf(url) === index)
+    .slice(0, 24);
+  const replacements: Array<{ sourceUrl: string; dataUrl: string }> = [];
+  for (const sourceUrl of candidates) {
+    const downloaded = await downloadAliyunOssObject(sourceUrl).catch(() => null);
+    if (!downloaded || !/^image\/(png|jpe?g|webp|gif)$/i.test(downloaded.mimeType) || downloaded.buffer.length > 12_000_000) continue;
+    replacements.push({ sourceUrl, dataUrl: imageDataUrl(downloaded.buffer, downloaded.mimeType) });
+  }
+  return replaceInspectableImageSources(html, replacements);
+}
+
 function escapeHtmlAttribute(value: string) {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -90,6 +121,15 @@ function injectBaseHref(html: string, baseHref: string) {
 }
 
 async function prepareInspectableUrl(inputUrl: string, outputDir: string): Promise<{ url: string; issues: SiteQualityIssue[] }> {
+  if (inputUrl.startsWith("file:")) {
+    const sourcePath = fileURLToPath(inputUrl);
+    const html = await readFile(sourcePath, "utf8");
+    const snapshotPath = path.join(outputDir, "inspection.html");
+    const baseHref = pathToFileURL(`${path.dirname(sourcePath)}${path.sep}`).toString();
+    const inspectionHtml = await inlineInspectableOssImages(html);
+    await writeFile(snapshotPath, injectBaseHref(inspectionHtml, baseHref), "utf8");
+    return { url: pathToFileURL(snapshotPath).toString(), issues: [] };
+  }
   if (!/^https?:\/\//i.test(inputUrl)) return { url: inputUrl, issues: [] };
 
   const controller = new AbortController();
@@ -118,7 +158,8 @@ async function prepareInspectableUrl(inputUrl: string, outputDir: string): Promi
     }
 
     const snapshotPath = path.join(outputDir, "inspection.html");
-    await writeFile(snapshotPath, injectBaseHref(html, inputUrl), "utf8");
+    const inspectionHtml = await inlineInspectableOssImages(html);
+    await writeFile(snapshotPath, injectBaseHref(inspectionHtml, inputUrl), "utf8");
     return { url: pathToFileURL(snapshotPath).toString(), issues: [] };
   } catch (error) {
     return {

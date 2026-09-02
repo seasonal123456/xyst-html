@@ -10,6 +10,7 @@ import {
   shouldRetryIncompleteRemoteHtml,
   validateRemoteHtml
 } from "./remote-html-site-generator";
+import { replaceInspectableImageSources } from "./site-quality-checker";
 
 const validHtml = `<!doctype html>
 <html lang="zh-CN">
@@ -31,6 +32,24 @@ test("parses SSE JSON split across arbitrary chunk boundaries", () => {
   assert.equal(result.eventCount, 2);
   assert.equal(result.content, "<!doctype html><html><body>ok</body></html>");
   assert.equal(result.finishReason, "stop");
+});
+
+test("captures provider SSE error events", () => {
+  const parser = new ChatCompletionSseParser();
+  parser.push('data: {"error":{"message":"upstream overloaded","type":"server_error"}}\n\n');
+  const result = parser.finish();
+  assert.equal(result.content, "");
+  assert.equal(result.error, "upstream overloaded");
+});
+
+test("replaces private image sources only in the inspection snapshot", () => {
+  const sourceUrl = "https://bucket.example.com/a.png?x=1&y=2";
+  const html = `<img src="${sourceUrl}"><div style="background-image:url('${sourceUrl}')"></div><p>${sourceUrl}</p>`;
+  const inspected = replaceInspectableImageSources(html, [{ sourceUrl, dataUrl: "data:image/png;base64,AAAA" }]);
+  assert.match(inspected, /src="data:image\/png;base64,AAAA"/);
+  assert.match(inspected, /background-image:url\('data:image\/png;base64,AAAA'\)/);
+  assert.match(inspected, new RegExp(`<p>${sourceUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}</p>`));
+  assert.match(html, new RegExp(`src="${sourceUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`));
 });
 
 test("extracts one complete HTML document from provider wrappers", () => {
@@ -60,6 +79,7 @@ test("rejects a truncated PNG before sending it to the remote model", () => {
 
 test("retries only incomplete HTML and never retries unsafe output", () => {
   assert.equal(shouldRetryIncompleteRemoteHtml(validateRemoteHtml("<!doctype html><html><head><style></style></head><body>partial")), true);
+  assert.equal(shouldRetryIncompleteRemoteHtml(validateRemoteHtml("<!doctype html><html><head></head><body>partial")), true);
   assert.equal(shouldRetryIncompleteRemoteHtml(validateRemoteHtml(`${validHtml}<form></form>`)), false);
 });
 

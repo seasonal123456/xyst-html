@@ -63,6 +63,7 @@ type StreamState = {
   usage?: ParsedModelUsage;
   eventCount: number;
   finishReason?: string;
+  error?: string;
 };
 
 type ChatStreamChoice = {
@@ -75,6 +76,8 @@ type ChatStreamEvent = {
   model?: string;
   choices?: ChatStreamChoice[];
   usage?: unknown;
+  error?: { message?: string; code?: string; type?: string } | string;
+  message?: string;
 };
 
 type QualityRepairContext = {
@@ -187,6 +190,11 @@ export class ChatCompletionSseParser {
     try {
       const event = JSON.parse(data) as ChatStreamEvent;
       this.state.eventCount += 1;
+      const providerError = typeof event.error === "string" ? event.error : event.error?.message || event.message;
+      if (providerError) {
+        this.state.error = providerError;
+        return;
+      }
       if (!this.state.model && event.model) this.state.model = event.model;
       const choice = event.choices?.[0];
       const piece = contentText(choice);
@@ -264,7 +272,7 @@ export function codexEquivalentHtmlIssues(html: string, requiredImageUrls: strin
 }
 
 export function shouldRetryIncompleteRemoteHtml(errors: string[]) {
-  const incompleteMessages = ["HTML 内容过短", "缺少 <!doctype html>", "HTML 根节点不完整", "head 节点不完整", "body 节点不完整"];
+  const incompleteMessages = ["HTML 内容过短", "缺少 <!doctype html>", "HTML 根节点不完整", "head 节点不完整", "body 节点不完整", "缺少内联 style"];
   return errors.length > 0 && errors.every((error) => incompleteMessages.some((message) => error.includes(message)));
 }
 
@@ -434,6 +442,8 @@ async function callRemoteHtmlApi(
     }
     parser.push(decoder.decode());
     const result = parser.finish();
+    if (result.error) throw new Error(`远程官网生成接口流式错误：${result.error}`);
+    if (!result.content.trim()) throw new Error("远程官网生成接口返回空流，未生成任何内容。");
     attempts.push(result);
     await writeFile(path.join(diagnosticsDir, `remote-response-attempt-${attempts.length}-${label}.txt`), result.content, "utf8");
     return result;
@@ -662,7 +672,7 @@ export async function runPreparedRemoteHtmlExperiment(input: {
   generated = await callRemoteHtmlApi(
     config,
     input.prompt,
-    [...images, ...screenshots].slice(0, config.maxImageInputs),
+      screenshots.slice(0, config.maxImageInputs),
     input.siteJobId,
     outputDir,
     { html: generated.html, issues: initialIssues }
@@ -736,7 +746,7 @@ export async function generateRemoteHtmlWebsitePreview(
     generated = await callRemoteHtmlApi(
       config,
       prompt,
-      [...images, ...screenshotInputs].slice(0, config.maxImageInputs),
+      screenshotInputs.slice(0, config.maxImageInputs),
       job.id,
       runDir,
       { html: generated.html, issues: [...deterministicIssues, ...browserIssues] }
